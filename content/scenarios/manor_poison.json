@@ -1,0 +1,53 @@
+{
+  "id": "manor_poison",
+  "level": 1,
+  "title": "The Manor Poisoning",
+  "charge": "That Evelyn Crowe did murder Lord Harrington by poison on the night of March 12.",
+  "setting": "A country manor on a stormy night",
+  "case_summary": "Lord Harrington collapsed after dinner. A broken vial was found under his desk. His business partner Evelyn Crowe is on trial. The prosecution says she poisoned his wine over unpaid debts; the defense says she was framed and the vial was planted.",
+  "defendant": {"id": "evelyn", "name": "Evelyn Crowe"},
+  "verdict_truth": "guilty",
+  "solution": "Evelyn poisoned the wine in the study. She owed Harrington money, was alone with him at 9pm, and later planted a second footprint to suggest an intruder.",
+  "prosecution": {
+    "id": "prosecution",
+    "name": "ADA Morgan Vale",
+    "persona": "Precise, cold, speaks in short decisive sentences.",
+    "brief": [
+      "Evelyn owed Harrington a large sum documented in his ledger.",
+      "Evelyn was alone with Harrington in the study at 9pm.",
+      "Residue on the vial matches the poison found in Harrington's wine.",
+      "Do not reveal the true verdict; argue guilt from these facts only."
+    ]
+  },
+  "defense": {
+    "id": "defense",
+    "name": "Counsel Sam Okonkwo",
+    "persona": "Warm, rhetorical, challenges every leap of logic.",
+    "brief": [
+      "A second footprint near the window suggests an outsider.",
+      "Evelyn had dinner witnesses until 8:45pm.",
+      "The vial could have been planted after the collapse.",
+      "Argue reasonable doubt; never admit Evelyn is guilty."
+    ]
+  },
+  "evidence": [
+    {
+      "id": "ev_vial",
+      "text": "A broken vial with poison residue was found under Harrington's desk.",
+      "reveal_condition": {"type": "round_gte", "value": "2"},
+      "revealed": false
+    },
+    {
+      "id": "ev_ledger",
+      "text": "Harrington's ledger shows Evelyn owed him a substantial unpaid debt.",
+      "reveal_condition": {"type": "keyword", "value": "money"},
+      "revealed": false
+    },
+    {
+      "id": "ev_footprint",
+      "text": "A second footprint was found near the study window.",
+      "reveal_condition": {"type": "round_gte", "value": "4"},
+      "revealed": false
+    }
+  ]
+}

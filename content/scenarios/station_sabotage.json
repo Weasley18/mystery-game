@@ -1,0 +1,53 @@
+{
+  "id": "station_sabotage",
+  "level": 2,
+  "title": "Sabotage on Station Helix",
+  "charge": "That technician Rina Park did sabotage the oxygen scrubber, endangering the crew.",
+  "setting": "Orbital research station Helix, Sector 7",
+  "case_summary": "The oxygen scrubber failed during the night shift. Logs show Rina Park's badge near the maintenance bay. Prosecution claims intentional sabotage over a denied promotion; defense claims a software bug and stolen badge credentials.",
+  "defendant": {"id": "rina", "name": "Rina Park"},
+  "verdict_truth": "not_guilty",
+  "solution": "Rina is innocent. Commander Holt forged badge logs and planted a tool with her serial after she reported his safety violations. The scrubber failure was a firmware bug Holt delayed patching.",
+  "prosecution": {
+    "id": "prosecution",
+    "name": "Prosecutor Lian Cho",
+    "persona": "Technical, cites logs and timestamps obsessively.",
+    "brief": [
+      "Badge logs place Rina in the maintenance bay at 02:14.",
+      "A diagnostic tool with Rina's serial was found open beside the scrubber.",
+      "Rina was denied a promotion the week before.",
+      "Argue sabotage; do not know or reveal she is innocent."
+    ]
+  },
+  "defense": {
+    "id": "defense",
+    "name": "Advocate Jules Mendez",
+    "persona": "Calm, methodical, focuses on chain-of-custody gaps.",
+    "brief": [
+      "Badge credentials were cloned twice that month—security tickets exist.",
+      "Firmware patch notes show a known scrubber crash bug.",
+      "Commander Holt had access and motive after Rina filed a safety complaint.",
+      "Push reasonable doubt hard; never invent that Rina confessed."
+    ]
+  },
+  "evidence": [
+    {
+      "id": "ev_badge",
+      "text": "Access logs show Rina's badge near the scrubber at 02:14.",
+      "reveal_condition": {"type": "round_gte", "value": "2"},
+      "revealed": false
+    },
+    {
+      "id": "ev_tool",
+      "text": "A diagnostic tool tagged to Rina was found open beside the scrubber.",
+      "reveal_condition": {"type": "keyword", "value": "tool"},
+      "revealed": false
+    },
+    {
+      "id": "ev_patch",
+      "text": "Unapplied firmware patch notes describe a scrubber crash under load.",
+      "reveal_condition": {"type": "keyword", "value": "firmware"},
+      "revealed": false
+    }
+  ]
+}

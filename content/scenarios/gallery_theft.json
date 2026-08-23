@@ -1,0 +1,53 @@
+{
+  "id": "gallery_theft",
+  "level": 3,
+  "title": "The Midnight Gallery",
+  "charge": "That curator Noah Bell did steal the painting 'Winter Mirror' from the city gallery.",
+  "setting": "Municipal Gallery, closing night of the Winter exhibit",
+  "case_summary": "Winter Mirror vanished after closing. Noah Bell's office keycard opened the east wing. Prosecution says Noah staged a theft for insurance; defense says a guest list forger and a disabled camera prove an outside job.",
+  "defendant": {"id": "noah", "name": "Noah Bell"},
+  "verdict_truth": "guilty",
+  "solution": "Noah stole Winter Mirror. He disabled camera 4, used his keycard, and sold a forged provenance trail. The 'guest forger' story was his cover.",
+  "prosecution": {
+    "id": "prosecution",
+    "name": "DA Priya Shah",
+    "persona": "Theatrical, frames narrative beats for the jury.",
+    "brief": [
+      "Noah's keycard opened the east wing at 23:41.",
+      "Camera 4 was powered off from Noah's office terminal.",
+      "Noah recently inquired about high-value art insurance payouts.",
+      "Argue guilt; do not leak the word solution or secret briefs."
+    ]
+  },
+  "defense": {
+    "id": "defense",
+    "name": "Attorney Keiko Ito",
+    "persona": "Quiet, surgical, dismantles assumptions.",
+    "brief": [
+      "Guest badges were reprinted that afternoon with a known forger's watermark.",
+      "Camera 4 had prior intermittent outages logged by facilities.",
+      "Noah reported the missing painting himself within minutes.",
+      "Argue not guilty with doubt; never concede the theft."
+    ]
+  },
+  "evidence": [
+    {
+      "id": "ev_keycard",
+      "text": "Keycard logs show Noah's card opened the east wing at 23:41.",
+      "reveal_condition": {"type": "round_gte", "value": "2"},
+      "revealed": false
+    },
+    {
+      "id": "ev_camera",
+      "text": "Camera 4 was powered off from a terminal in Noah's office.",
+      "reveal_condition": {"type": "keyword", "value": "camera"},
+      "revealed": false
+    },
+    {
+      "id": "ev_badge",
+      "text": "Guest badges reprinted that day carry a known forger's watermark.",
+      "reveal_condition": {"type": "round_gte", "value": "5"},
+      "revealed": false
+    }
+  ]
+}

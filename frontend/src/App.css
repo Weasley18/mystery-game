@@ -1,0 +1,669 @@
+:root {
+  --ink: #0c0e13;
+  --oak: #1a1b21;
+  --oak-2: #1e1f25;
+  --crimson: #c23b22;
+  --crimson-hot: #ffb4a5;
+  --brass: #ecc246;
+  --brass-dim: #c9a227;
+  --parchment: #eae1da;
+  --dust: #a89a88;
+  --paper: #e2e2e9;
+  --outline: #59413c;
+  --serif: "Playfair Display", "Times New Roman", serif;
+  --sans: "Source Sans 3", "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { min-height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--sans);
+  line-height: 1.45;
+}
+
+h1, h2, h3 {
+  font-family: var(--serif);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.4rem;
+}
+
+.app {
+  position: relative;
+  min-height: 100vh;
+}
+
+.app.antechamber {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 24px 32px;
+}
+
+.app.antechamber::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background:
+    linear-gradient(180deg, rgba(12, 14, 19, 0.55) 0%, rgba(12, 14, 19, 0.82) 100%),
+    url("/court/courtroom-bg.png") center / cover no-repeat;
+}
+
+.scanlines {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  opacity: 0.22;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 2px,
+    rgba(0, 0, 0, 0.18) 3px
+  );
+}
+
+.app > *:not(.scanlines) { position: relative; z-index: 3; }
+
+.topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 16px;
+  height: 72px;
+  border-bottom: 1px solid rgba(201, 162, 39, 0.28);
+}
+
+.app.in-session .topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 0 20px;
+  height: 56px;
+  background: linear-gradient(180deg, rgba(12, 14, 19, 0.75), transparent);
+  border: none;
+  z-index: 8;
+}
+
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand h1 { margin: 0; font-size: 22px; letter-spacing: 0.1em; }
+
+.seal {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--brass);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 4px var(--ink), inset 0 0 0 6px var(--brass-dim);
+}
+
+.lbl, .eyebrow, .kicker {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dust);
+  margin: 0;
+}
+
+.case-chip { text-align: center; }
+.case-chip em {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border: 1px solid rgba(194, 59, 34, 0.45);
+  color: var(--crimson-hot);
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+.juror-meta { text-align: right; }
+.juror-meta code { display: block; color: var(--brass); font-size: 12px; }
+
+.docket {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 24px;
+  padding-top: 28px;
+}
+
+.hero { grid-column: 1 / -1; }
+.hero h2 { font-size: 48px; line-height: 1.1; max-width: 18ch; }
+
+.case-grid { display: grid; gap: 16px; }
+
+.case-card, .session-card, .file, .counsel, .identity, .thread, .exhibits, .deliberation, .record {
+  background: rgba(26, 27, 33, 0.88);
+  border: 1px solid rgba(201, 162, 39, 0.28);
+  border-radius: 12px;
+  padding: 18px;
+  backdrop-filter: blur(8px);
+}
+
+.case-card {
+  cursor: pointer;
+  color: inherit;
+  width: 100%;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+
+.case-card.selected { border-color: var(--brass); }
+
+.lvl {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--brass);
+  border: 1px solid rgba(201, 162, 39, 0.4);
+  padding: 2px 8px;
+  margin-bottom: 8px;
+}
+
+label {
+  display: block;
+  margin: 0 0 12px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dust);
+}
+
+input, select {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid var(--brass-dim);
+  border-radius: 8px 8px 0 0;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--sans);
+}
+
+button {
+  font-family: var(--sans);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 12px 16px;
+}
+
+button.primary { background: var(--crimson); color: #ffe8e4; border: 1px solid var(--crimson); }
+button.secondary { background: transparent; color: var(--brass); border: 1px solid var(--brass); }
+button.ghost { background: transparent; color: var(--dust); border: none; padding: 8px 0; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.or {
+  text-align: center;
+  color: var(--dust);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin: 16px 0;
+}
+
+.lobby-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 20px;
+  padding-top: 24px;
+}
+
+.counsel-pair { display: grid; gap: 16px; }
+.counsel.prosecution { border-left: 4px solid var(--crimson); }
+.counsel.defense { border-left: 4px solid var(--brass); }
+.lobby-sprite {
+  display: block;
+  height: 160px;
+  width: auto;
+  margin: -8px auto 8px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 85% at 50% 50%, #000 70%, transparent 92%);
+  mask-image: radial-gradient(ellipse 70% 85% at 50% 50%, #000 70%, transparent 92%);
+}
+.lead { font-size: 18px; }
+.hint { color: var(--dust); font-size: 14px; }
+
+/* —— Courtroom stage —— */
+.courtroom {
+  position: relative;
+  height: 100vh;
+  overflow: hidden;
+  color: var(--paper);
+}
+
+.court-bg {
+  position: absolute;
+  inset: 0;
+  background: url("/court/courtroom-bg.png") center / cover no-repeat;
+}
+
+.court-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(12, 14, 19, 0.35) 0%, transparent 22%, transparent 48%, rgba(12, 14, 19, 0.55) 72%, rgba(12, 14, 19, 0.92) 100%),
+    radial-gradient(ellipse at 50% 40%, transparent 40%, rgba(12, 14, 19, 0.45) 100%);
+  pointer-events: none;
+}
+
+.actor {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  transition: transform 0.35s ease, filter 0.35s ease;
+}
+
+.actor.selectable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.actor.selectable:focus-visible .nametag,
+.actor.prosecution.selectable:hover .nametag {
+  outline: 2px solid var(--crimson);
+}
+
+.actor.defense.selectable:hover .nametag,
+.actor.defense.selectable:focus-visible .nametag {
+  outline: 2px solid var(--brass);
+}
+
+.actor.speaking {
+  z-index: 6;
+  transform: translateY(-8px) scale(1.04);
+  filter: drop-shadow(0 0 22px rgba(236, 194, 70, 0.35));
+}
+
+.sprite-wrap {
+  position: relative;
+}
+
+.sprite-wrap::after {
+  content: "";
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: 4%;
+  height: 18%;
+  background: radial-gradient(ellipse, rgba(0, 0, 0, 0.55), transparent 70%);
+  pointer-events: none;
+}
+
+.actor img {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  -webkit-mask-image: radial-gradient(ellipse 72% 88% at 50% 52%, #000 66%, transparent 88%);
+  mask-image: radial-gradient(ellipse 72% 88% at 50% 52%, #000 66%, transparent 88%);
+}
+
+.actor.judge {
+  top: 7%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(22vw, 240px);
+  height: min(32vh, 280px);
+}
+
+.actor.defendant {
+  top: 28%;
+  left: 38%;
+  width: min(16vw, 170px);
+  height: min(34vh, 280px);
+  opacity: 0.92;
+}
+
+.actor.prosecution {
+  left: 4%;
+  bottom: 28%;
+  width: min(28vw, 340px);
+  height: min(58vh, 520px);
+}
+
+.actor.defense {
+  right: 4%;
+  bottom: 28%;
+  width: min(28vw, 340px);
+  height: min(58vh, 520px);
+}
+
+.actor.prosecution.speaking { transform: translateY(-10px) scale(1.05); }
+.actor.defense.speaking { transform: translateY(-10px) scale(1.05); }
+
+.nametag {
+  margin-top: -8px;
+  padding: 6px 12px 8px;
+  background: rgba(12, 14, 19, 0.78);
+  border: 1px solid rgba(201, 162, 39, 0.4);
+  border-radius: 8px;
+  text-align: center;
+  min-width: 120px;
+}
+
+.nametag span {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dust);
+}
+
+.nametag strong {
+  font-family: var(--serif);
+  font-size: 14px;
+}
+
+.actor.chosen .nametag {
+  box-shadow: 0 0 0 2px var(--brass);
+}
+.actor.prosecution.chosen .nametag {
+  box-shadow: 0 0 0 2px var(--crimson);
+}
+
+.speech {
+  position: absolute;
+  bottom: 92%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(280px, 70vw);
+  background: var(--parchment);
+  color: #1f1b17;
+  border-radius: 12px;
+  padding: 10px 12px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  animation: pop 0.25s ease;
+}
+
+.speech::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  transform: translateX(-50%);
+  border: 8px solid transparent;
+  border-top-color: var(--parchment);
+}
+
+.speech-who {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6a4a1a;
+  margin-bottom: 4px;
+}
+
+.speech p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  max-height: 7.2em;
+  overflow: hidden;
+}
+
+.actor.judge .speech {
+  width: min(340px, 50vw);
+  bottom: auto;
+  top: 88%;
+}
+
+.actor.judge .speech::after {
+  top: -8px;
+  bottom: auto;
+  border-top-color: transparent;
+  border-bottom-color: var(--parchment);
+}
+
+@keyframes pop {
+  from { transform: translateX(-50%) scale(0.92); opacity: 0; }
+  to { transform: translateX(-50%) scale(1); opacity: 1; }
+}
+
+.jury-rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 7;
+  padding: 12px 16px 14px;
+  background:
+    linear-gradient(180deg, transparent, rgba(18, 12, 8, 0.55) 12%),
+    repeating-linear-gradient(
+      90deg,
+      #3a2418 0 18px,
+      #2a1a12 18px 20px
+    );
+  border-top: 8px solid #5a3a24;
+  box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.45);
+  max-height: 38vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.rail-head h2 { margin: 0; font-size: 20px; }
+.rail-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.rail-body {
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+}
+
+.record-strip {
+  background: rgba(12, 14, 19, 0.72);
+  border: 1px solid rgba(201, 162, 39, 0.25);
+  border-radius: 10px;
+  padding: 8px 10px;
+  overflow-y: auto;
+  max-height: 16vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exhibits-card {
+  background: rgba(12, 14, 19, 0.72);
+  border: 1px solid rgba(201, 162, 39, 0.25);
+  border-radius: 10px;
+  padding: 10px;
+  overflow: auto;
+  max-height: 16vh;
+}
+
+.exhibits-card ul, .jurors ul { list-style: none; padding: 0; margin: 8px 0 0; }
+.exhibits-card li {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(168, 154, 136, 0.2);
+  font-size: 13px;
+}
+.exhibits-card li span {
+  background: var(--parchment);
+  color: #1f1b17;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+  height: fit-content;
+}
+.muted { color: var(--dust); }
+
+.slip {
+  background: #1a1b21;
+  border-radius: 0 10px 10px 0;
+  padding: 8px 10px;
+}
+.slip.argument.prosecution, .slip.qa.prosecution { border-left: 4px solid var(--crimson); }
+.slip.argument.defense, .slip.qa.defense { border-left: 4px solid var(--brass); }
+.slip.you {
+  margin-left: 24px;
+  background: var(--parchment);
+  color: #1f1b17;
+  border-radius: 10px;
+}
+.slip.you .who { color: #4b4641; }
+.slip.system, .slip.error {
+  align-self: center;
+  border: 1px dashed var(--outline);
+  background: transparent;
+  font-size: 13px;
+  color: var(--dust);
+}
+
+.who {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--brass);
+  margin-bottom: 4px;
+}
+.slip p { margin: 0; white-space: pre-wrap; }
+
+.composer {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.direct {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dust);
+}
+
+.direct-toggle { display: flex; gap: 6px; }
+.direct-toggle button {
+  padding: 10px 12px;
+  background: rgba(12, 14, 19, 0.7);
+  color: var(--dust);
+  border: 1px solid rgba(201, 162, 39, 0.3);
+}
+.direct-toggle button.on.prosecution {
+  color: #ffe8e4;
+  border-color: var(--crimson);
+  background: rgba(194, 59, 34, 0.35);
+}
+.direct-toggle button.on.defense {
+  color: var(--brass);
+  border-color: var(--brass);
+  background: rgba(236, 194, 70, 0.18);
+}
+
+.deliberation-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.banner {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #282a2f;
+}
+.banner.error { background: #3a1210; color: #ffdad6; }
+
+.verdict-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(12, 14, 19, 0.82);
+  backdrop-filter: blur(8px);
+  padding: 16px;
+}
+
+.verdict-sheet {
+  width: min(640px, 100%);
+  background: var(--parchment);
+  color: #1f1b17;
+  border: 2px solid var(--brass);
+  border-radius: 12px;
+  padding: 40px 36px;
+  text-align: center;
+}
+
+.mega {
+  font-family: var(--serif);
+  font-size: 80px;
+  line-height: 0.9;
+  margin: 12px 0 0;
+}
+.mega.yes { color: var(--crimson); }
+.mega.no { color: #3d2e00; }
+.sub { margin-top: 4px; letter-spacing: 0.08em; text-transform: uppercase; font-size: 13px; }
+
+.reason {
+  text-align: left;
+  background: rgba(31, 27, 23, 0.06);
+  padding: 16px;
+  border-radius: 8px;
+  margin: 20px 0;
+}
+.reason-head {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(31, 27, 23, 0.15);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+}
+
+@media (max-width: 980px) {
+  .docket, .lobby-grid, .topbar { grid-template-columns: 1fr; }
+  .topbar { height: auto; padding: 12px 0; }
+  .app.in-session .topbar { position: relative; background: var(--ink); }
+  .courtroom { height: auto; min-height: 100vh; overflow: visible; }
+  .actor.prosecution, .actor.defense {
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    width: 46%;
+    height: 280px;
+    display: inline-flex;
+  }
+  .actor.judge, .actor.defendant { display: none; }
+  .jury-rail {
+    position: relative;
+    max-height: none;
+  }
+  .rail-body, .composer { grid-template-columns: 1fr; }
+  .hero h2 { font-size: 32px; }
+}

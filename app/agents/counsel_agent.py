@@ -55,21 +55,47 @@ def _side_goal(role: str) -> str:
 
 
 def _filter_output(text: str, case: Case) -> str:
-    """Block leaks of secret fields or meta tokens."""
+    """Block leaks of secret fields or meta tokens (best-effort; models can still jailbreak)."""
     lowered = text.lower()
-    secrets = [
-        case.get("solution", ""),
-        case.get("verdict_truth", ""),
-    ]
-    banned_tokens = ("verdict_truth", "killer_id", "is_killer", "solution:")
+    banned_tokens = (
+        "verdict_truth",
+        "killer_id",
+        "is_killer",
+        "solution:",
+        "secret brief",
+        "private brief",
+        "system prompt",
+    )
     if any(tok in lowered for tok in banned_tokens):
         return _DEFLECTION
-    for secret in secrets:
-        if secret and len(secret) > 8 and secret.lower() in lowered:
-            return _DEFLECTION
-    # strip accidental fence leakage of brief labels
-    if re.search(r"\bsecret brief\b", lowered):
+
+    # Always check solution / verdict_truth regardless of length (e.g. "guilty").
+    solution = (case.get("solution") or "").strip()
+    if solution and solution.lower() in lowered:
         return _DEFLECTION
+
+    truth = (case.get("verdict_truth") or "").strip().lower()
+    if truth:
+        # Phrase forms that look like revealing the sealed answer, not normal advocacy.
+        escaped = re.escape(truth)
+        leak_patterns = (
+            r"\bverdict[_\s-]?truth\b.{0,40}\b" + escaped + r"\b",
+            r"\bsealed\s+(?:truth|verdict)\b.{0,40}\b" + escaped + r"\b",
+            r"\bthe\s+(?:true\s+)?verdict\s+is\b.{0,20}\b" + escaped + r"\b",
+            r"\bhidden\s+answer\b.{0,40}\b" + escaped + r"\b",
+            r"\bsolution\b.{0,40}\b" + escaped + r"\b",
+        )
+        if any(re.search(p, lowered) for p in leak_patterns):
+            return _DEFLECTION
+
+    # Brief line leakage (long lines only)
+    for role in ("prosecution", "defense"):
+        brief = (case.get(role) or {}).get("brief") or []
+        for line in brief:
+            line = str(line).strip()
+            if len(line) >= 24 and line.lower() in lowered:
+                return _DEFLECTION
+
     return text
 
 

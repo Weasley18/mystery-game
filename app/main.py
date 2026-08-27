@@ -11,12 +11,14 @@ Routes:
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
@@ -24,22 +26,39 @@ from pydantic import ValidationError
 load_dotenv()
 
 
+def _is_production() -> bool:
+    env = (os.getenv("ENVIRONMENT") or "").strip().lower()
+    if env in ("production", "prod"):
+        return True
+    return (os.getenv("RENDER") or "").strip().lower() in ("true", "1", "yes")
+
+
 def _cors_origins() -> list[str]:
-    raw = (os.getenv("CORS_ORIGINS") or "").strip()
-    if raw == "*":
+    """
+    CORS allowlist.
+    - Unset CORS_ORIGINS → localhost defaults (local dev).
+    - Empty string → no cross-origin (same-origin SPA deploy).
+    - "*" → only outside production.
+    - Comma list → explicit allowlist.
+    """
+    raw = os.getenv("CORS_ORIGINS")
+    if raw is None:
+        return [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+            "http://localhost",
+            "http://127.0.0.1",
+        ]
+    stripped = raw.strip()
+    if stripped == "*":
+        if _is_production():
+            return []
         return ["*"]
-    extra = [o.strip() for o in raw.split(",") if o.strip()]
-    defaults = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
-        "http://localhost",
-        "http://127.0.0.1",
-    ]
-    return extra or defaults
+    return [o.strip() for o in stripped.split(",") if o.strip()]
 
 from app.models import (
     CreateGameRequest,
@@ -59,23 +78,66 @@ from app.redis_state import (
     add_player,
     get_players,
     player_count,
+    player_exists,
     check_rate_limit,
+    check_ip_rate_limit,
     QUESTION_COOLDOWN_SECONDS,
     ARGUMENT_COOLDOWN_SECONDS,
     VOTE_COOLDOWN_SECONDS,
+    MAX_PLAYERS_PER_GAME,
+    MAX_EXPECTED_PLAYERS,
+    IP_CREATE_LIMIT,
+    IP_CREATE_WINDOW,
+    IP_JOIN_LIMIT,
+    IP_JOIN_WINDOW,
+    IP_LLM_LIMIT,
+    IP_LLM_WINDOW,
 )
-from app.ids import new_game_id
+from app.ids import new_game_id, new_player_id
 from app.ws_manager import manager
-app = FastAPI(title="AI Courtroom Mystery")
+logger = logging.getLogger(__name__)
+_prod = _is_production()
+app = FastAPI(
+    title="AI Courtroom Mystery",
+    docs_url=None if _prod else "/docs",
+    redoc_url=None if _prod else "/redoc",
+    openapi_url=None if _prod else "/openapi.json",
+)
 
 _origins = _cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_origins,
-    allow_credentials="*" not in _origins,
+    allow_origins=_origins if _origins else [],
+    allow_credentials=bool(_origins) and "*" not in _origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _client_ip(request: Request | WebSocket) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip() or "unknown"
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _ws_origin_allowed(ws: WebSocket) -> bool:
+    """Reject browser WS from origins outside the CORS allowlist / same host."""
+    origin = ws.headers.get("origin")
+    if not origin:
+        return True  # non-browser clients
+    if "*" in _origins:
+        return True
+    if origin in _origins:
+        return True
+    host = ws.headers.get("host")
+    if host:
+        parsed = urlparse(origin)
+        if parsed.netloc == host:
+            return True
+    return False
 
 
 @app.get("/health")
@@ -105,16 +167,20 @@ async def scenarios():
 
 
 @app.post("/games", response_model=CreateGameResponse)
-async def create_game(req: CreateGameRequest):
+async def create_game(req: CreateGameRequest, request: Request):
+    ip = _client_ip(request)
+    if not await check_ip_rate_limit(ip, "create", IP_CREATE_LIMIT, IP_CREATE_WINDOW):
+        raise HTTPException(429, "rate_limited")
+
     try:
         case = load_scenario(req.scenario_id)
     except FileNotFoundError:
-        raise HTTPException(404, f"scenario not found: {req.scenario_id}")
+        raise HTTPException(404, "scenario not found")
     except ValueError as e:
         raise HTTPException(400, str(e))
 
     game_id = new_game_id()
-    expected = max(1, req.expected_players)
+    expected = min(max(1, req.expected_players), MAX_EXPECTED_PLAYERS)
 
     await save_public_state(
         game_id,
@@ -163,10 +229,19 @@ async def create_game(req: CreateGameRequest):
 
 
 @app.post("/games/{game_id}/join", response_model=JoinGameResponse)
-async def join_game(game_id: str, req: JoinGameRequest):
+async def join_game(game_id: str, req: JoinGameRequest, request: Request):
+    ip = _client_ip(request)
+    if not await check_ip_rate_limit(ip, "join", IP_JOIN_LIMIT, IP_JOIN_WINDOW):
+        raise HTTPException(429, "rate_limited")
+
     if await get_public_state(game_id) is None:
         raise HTTPException(404, "game not found")
-    player_id = uuid.uuid4().hex[:8]
+
+    count = await player_count(game_id)
+    if count >= MAX_PLAYERS_PER_GAME:
+        raise HTTPException(403, "game is full")
+
+    player_id = new_player_id()
     await add_player(game_id, player_id, req.player_name)
     return JoinGameResponse(player_id=player_id, game_id=game_id)
 
@@ -181,11 +256,15 @@ async def game_state(game_id: str):
     for key in ("verdict_truth", "solution", "brief"):
         if state.get("status") != "finished":
             state.pop(key, None)
-    return {**state, "players": list(players.values()), "player_ids": list(players.keys())}
+    return {**state, "players": list(players.values())}
 
 
 @app.websocket("/ws/{game_id}/{player_id}")
 async def game_socket(ws: WebSocket, game_id: str, player_id: str):
+    if not _ws_origin_allowed(ws):
+        await ws.close(code=1008)
+        return
+
     pub = await get_public_state(game_id)
     if pub is None:
         await ws.accept()
@@ -193,8 +272,15 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
         await ws.close()
         return
 
+    if not await player_exists(game_id, player_id):
+        await ws.accept()
+        await ws.send_json(WSOutgoing(type="error", payload={"detail": "unauthorized"}).model_dump())
+        await ws.close()
+        return
+
     await manager.connect(game_id, player_id, ws)
     config = {"configurable": {"thread_id": game_id}}
+    client_ip = _client_ip(ws)
 
     # Reconnect: replay history from checkpoint
     try:
@@ -206,11 +292,12 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
                 player_id,
                 WSOutgoing(type="history", payload=history_payload(values)).model_dump(),
             )
-    except Exception as e:
+    except Exception:
+        logger.exception("history replay failed game_id=%s", game_id)
         await manager.send_to_player(
             game_id,
             player_id,
-            WSOutgoing(type="error", payload={"detail": f"history failed: {e}"}).model_dump(),
+            WSOutgoing(type="error", payload={"detail": "history_failed"}).model_dump(),
         )
 
     try:
@@ -221,8 +308,20 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
                 payload = incoming.model_dump()
                 payload["player_id"] = player_id
 
-                # Rate limits
+                # Rate limits (per player + per IP for LLM-backed actions)
                 if incoming.type == "question":
+                    if not await check_ip_rate_limit(
+                        client_ip, "llm", IP_LLM_LIMIT, IP_LLM_WINDOW
+                    ):
+                        await manager.send_to_player(
+                            game_id,
+                            player_id,
+                            WSOutgoing(
+                                type="error",
+                                payload={"detail": "rate_limited"},
+                            ).model_dump(),
+                        )
+                        continue
                     action = f"q:{incoming.agent_id}"
                     allowed = await check_rate_limit(
                         game_id, player_id, action, QUESTION_COOLDOWN_SECONDS
@@ -238,6 +337,18 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
                         )
                         continue
                 elif incoming.type in ("start_debate", "next_argument"):
+                    if not await check_ip_rate_limit(
+                        client_ip, "llm", IP_LLM_LIMIT, IP_LLM_WINDOW
+                    ):
+                        await manager.send_to_player(
+                            game_id,
+                            player_id,
+                            WSOutgoing(
+                                type="error",
+                                payload={"detail": "rate_limited"},
+                            ).model_dump(),
+                        )
+                        continue
                     allowed = await check_rate_limit(
                         game_id, player_id, "argument", ARGUMENT_COOLDOWN_SECONDS
                     )
@@ -385,11 +496,12 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
                         payload={"detail": e.errors(include_context=False, include_url=False)},
                     ).model_dump(),
                 )
-            except Exception as e:
+            except Exception:
+                logger.exception("ws handler error game_id=%s", game_id)
                 await manager.send_to_player(
                     game_id,
                     player_id,
-                    WSOutgoing(type="error", payload={"detail": str(e)}).model_dump(),
+                    WSOutgoing(type="error", payload={"detail": "internal_error"}).model_dump(),
                 )
 
     except WebSocketDisconnect:

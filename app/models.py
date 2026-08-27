@@ -6,7 +6,8 @@ FastAPI request/response bodies and WebSocket message validation.
 """
 
 from typing import Literal, Optional, TypedDict
-from pydantic import BaseModel, model_validator
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -80,9 +81,15 @@ class GameState(TypedDict):
 # API request/response bodies (Pydantic)
 # ---------------------------------------------------------------------------
 
+_SCENARIO_ID_RE = r"^[a-z0-9_]+$"
+MAX_PLAYER_NAME_LEN = 40
+MAX_QUESTION_LEN = 500
+MAX_EXPECTED_PLAYERS = 12
+
+
 class CreateGameRequest(BaseModel):
-    scenario_id: str
-    expected_players: int = 1
+    scenario_id: str = Field(..., min_length=1, max_length=64, pattern=_SCENARIO_ID_RE)
+    expected_players: int = Field(default=1, ge=1, le=MAX_EXPECTED_PLAYERS)
 
 
 class CreateGameResponse(BaseModel):
@@ -99,7 +106,15 @@ class CreateGameResponse(BaseModel):
 
 
 class JoinGameRequest(BaseModel):
-    player_name: str
+    player_name: str = Field(..., min_length=1, max_length=MAX_PLAYER_NAME_LEN)
+
+    @field_validator("player_name")
+    @classmethod
+    def strip_name(cls, v: str) -> str:
+        name = v.strip()
+        if not name:
+            raise ValueError("player_name is required")
+        return name
 
 
 class JoinGameResponse(BaseModel):
@@ -125,7 +140,7 @@ class WSIncoming(BaseModel):
         "cast_vote",
     ]
     agent_id: Optional[str] = None  # prosecution | defense for question
-    text: Optional[str] = None
+    text: Optional[str] = Field(default=None, max_length=MAX_QUESTION_LEN)
     vote: Optional[Literal["guilty", "not_guilty"]] = None
 
     @model_validator(mode="after")
@@ -135,6 +150,7 @@ class WSIncoming(BaseModel):
                 raise ValueError("agent_id must be 'prosecution' or 'defense'")
             if not self.text or not str(self.text).strip():
                 raise ValueError("text is required for question")
+            self.text = str(self.text).strip()
         elif self.type == "cast_vote":
             if self.vote not in ("guilty", "not_guilty"):
                 raise ValueError("vote must be 'guilty' or 'not_guilty'")

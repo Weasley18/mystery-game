@@ -99,7 +99,32 @@ def test_next_argument_alternates():
 def test_output_filter_blocks_solution_leak():
     case = make_case()
     leaked = f"The truth is: {case['solution']}"
-    assert "poisoned" not in _filter_output(leaked, case).lower() or _filter_output(leaked, case).startswith("I must")
+    filtered = _filter_output(leaked, case)
+    assert filtered.startswith("I must")
+    assert case["solution"].lower() not in filtered.lower()
+
+
+def test_output_filter_blocks_verdict_truth_phrase():
+    case = make_case()
+    leaked = f"The sealed verdict is {case['verdict_truth']} according to the file."
+    filtered = _filter_output(leaked, case)
+    assert filtered.startswith("I must")
+
+
+def test_output_filter_allows_normal_advocacy():
+    case = make_case()
+    ok = "The evidence shows the defendant is guilty beyond a reasonable doubt."
+    assert _filter_output(ok, case) == ok
+
+
+def test_load_scenario_rejects_path_traversal():
+    import pytest
+    from app.scenarios import load_scenario
+
+    with pytest.raises(ValueError):
+        load_scenario("../etc/passwd")
+    with pytest.raises(ValueError):
+        load_scenario("manor_poison/../../secrets")
 
 
 def test_injection_output_does_not_echo_verdict_truth():

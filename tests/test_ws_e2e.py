@@ -32,6 +32,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("ARGUMENT_COOLDOWN_SECONDS", "0")
     monkeypatch.setenv("QUESTION_COOLDOWN_SECONDS", "30")
     monkeypatch.setenv("VOTE_COOLDOWN_SECONDS", "0")
+    monkeypatch.setenv("IP_CREATE_LIMIT", "0")
+    monkeypatch.setenv("IP_JOIN_LIMIT", "0")
+    monkeypatch.setenv("IP_LLM_LIMIT", "0")
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("RENDER", raising=False)
 
     import importlib
     import app.graph.game_graph as gg
@@ -43,6 +48,7 @@ def client(tmp_path, monkeypatch):
     gg._conn = None
     importlib.reload(gg)
     rs._redis = None
+    importlib.reload(rs)
 
     import app.main as main
 
@@ -88,7 +94,16 @@ def test_create_join_history_argument_vote(client):
 
     state = client.get(f"/games/{game_id}/state")
     assert state.status_code == 200
-    assert "verdict_truth" not in state.json()
+    body_state = state.json()
+    assert "verdict_truth" not in body_state
+    assert "player_ids" not in body_state
+    assert "players" in body_state
+
+    # Unknown player_id must not get a live seat
+    with client.websocket_connect(f"/ws/{game_id}/notarealseat") as ws:
+        err = ws.receive_json()
+        assert err["type"] == "error"
+        assert err["payload"]["detail"] == "unauthorized"
 
     with client.websocket_connect(f"/ws/{game_id}/{p1}") as ws:
         hist = ws.receive_json()

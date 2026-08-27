@@ -13,8 +13,11 @@ services:
         value: /app/frontend/dist
       - key: CHECKPOINT_DB
         value: /tmp/checkpoints.db
+      - key: ENVIRONMENT
+        value: production
+      # Same-origin SPA: empty CORS (no browser cross-origin). Set public URL if UI is on another host.
       - key: CORS_ORIGINS
-        value: "*"
+        value: ""
       - key: REDIS_URL
         fromService:
           type: redis

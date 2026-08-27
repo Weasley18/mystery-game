@@ -5,6 +5,7 @@ Load and validate authored courtroom scenario packs from content/scenarios/.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,22 @@ from app.models import Case, Counsel, Evidence
 _SCENARIOS_DIR = Path(__file__).resolve().parent.parent / "content" / "scenarios"
 _ALLOWED_REVEAL = frozenset({"round_gte", "keyword"})
 _ALLOWED_VERDICTS = frozenset({"guilty", "not_guilty"})
+
+_SCENARIO_ID_RE = re.compile(r"^[a-z0-9_]+$")
+
+
+def _safe_scenario_path(scenario_id: str) -> Path:
+    """Resolve scenario file under scenarios dir; reject traversal / bad ids."""
+    if not _SCENARIO_ID_RE.fullmatch(scenario_id or ""):
+        raise ValueError(f"invalid scenario_id: {scenario_id!r}")
+    root = _SCENARIOS_DIR.resolve()
+    path = (root / f"{scenario_id}.json").resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as e:
+        raise ValueError(f"invalid scenario_id: {scenario_id!r}") from e
+    return path
+
 
 
 def _validate_counsel(role: str, data: dict) -> None:
@@ -93,7 +110,7 @@ def list_scenarios() -> list[dict[str, Any]]:
 
 
 def load_scenario(scenario_id: str) -> Case:
-    path = _SCENARIOS_DIR / f"{scenario_id}.json"
+    path = _safe_scenario_path(scenario_id)
     if not path.exists():
         # also allow lookup by id field inside files
         for candidate in _SCENARIOS_DIR.glob("*.json"):

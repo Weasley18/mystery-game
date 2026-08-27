@@ -31,7 +31,10 @@ def _is_production() -> bool:
     env = (os.getenv("ENVIRONMENT") or "").strip().lower()
     if env in ("production", "prod"):
         return True
-    return (os.getenv("RENDER") or "").strip().lower() in ("true", "1", "yes")
+    if (os.getenv("RENDER") or "").strip().lower() in ("true", "1", "yes"):
+        return True
+    # Railway sets RAILWAY_ENVIRONMENT (e.g. production) on deployed services.
+    return bool((os.getenv("RAILWAY_ENVIRONMENT") or "").strip())
 
 
 def _cors_origins() -> list[str]:

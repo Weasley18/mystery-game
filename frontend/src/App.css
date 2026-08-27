@@ -246,12 +246,14 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .court-bg {
   position: absolute;
   inset: 0;
+  z-index: 0;
   background: url("/court/courtroom-bg.png") center / cover no-repeat;
 }
 
 .court-vignette {
   position: absolute;
   inset: 0;
+  z-index: 1;
   background:
     linear-gradient(180deg, rgba(12, 14, 19, 0.35) 0%, transparent 22%, transparent 48%, rgba(12, 14, 19, 0.55) 72%, rgba(12, 14, 19, 0.92) 100%),
     radial-gradient(ellipse at 50% 40%, transparent 40%, rgba(12, 14, 19, 0.45) 100%);
@@ -261,7 +263,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .gallery {
   position: absolute;
   inset: 0;
+  z-index: 2;
   pointer-events: none;
+  /* Allow speech bubbles to paint above sibling actors / vignette */
+  overflow: visible;
 }
 
 .gallery .actor.selectable {
@@ -275,7 +280,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   flex-direction: column;
   align-items: center;
   pointer-events: none;
-  transition: transform 0.35s ease, filter 0.35s ease;
+  transition: transform 0.35s ease;
+  overflow: visible;
 }
 
 .actor.selectable {
@@ -294,16 +300,43 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 
 .actor.speaking {
-  z-index: 6;
+  z-index: 8;
   transform: translateY(-8px) scale(1.04);
+}
+
+.actor.speaking .sprite-figure {
   filter: drop-shadow(0 0 22px rgba(236, 194, 70, 0.35));
+}
+
+.actor.prosecution.speaking,
+.actor.defense.speaking {
+  z-index: 8;
 }
 
 .sprite-wrap {
   position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: visible;
 }
 
-.sprite-wrap::after {
+.sprite-figure {
+  position: relative;
+  z-index: 1;
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.sprite-figure::after {
   content: "";
   position: absolute;
   left: 12%;
@@ -312,16 +345,101 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   height: 18%;
   background: radial-gradient(ellipse, rgba(0, 0, 0, 0.55), transparent 70%);
   pointer-events: none;
+  z-index: 0;
 }
 
-.actor img {
-  display: block;
-  height: 100%;
-  width: auto;
-  max-width: 100%;
-  object-fit: contain;
-  -webkit-mask-image: radial-gradient(ellipse 72% 88% at 50% 52%, #000 66%, transparent 88%);
-  mask-image: radial-gradient(ellipse 72% 88% at 50% 52%, #000 66%, transparent 88%);
+.speech {
+  position: absolute;
+  z-index: 5;
+  width: min(360px, 42vw);
+  max-width: min(420px, 46vw);
+  background: var(--parchment);
+  color: #1f1b17;
+  border-radius: 12px;
+  padding: 10px 12px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  animation: pop-side 0.25s ease;
+}
+
+/* Default / prosecution (left side of court): bubble to the RIGHT of the sprite */
+.actor.prosecution .speech {
+  top: 10%;
+  left: calc(100% - 12%);
+  right: auto;
+  bottom: auto;
+  transform: none;
+  margin: 0;
+}
+
+.actor.prosecution .speech::after {
+  left: -8px;
+  right: auto;
+  top: 28px;
+  bottom: auto;
+  transform: none;
+  border: 8px solid transparent;
+  border-right-color: var(--parchment);
+  border-top-color: transparent;
+}
+
+/* Defense (right side of court): bubble to the LEFT of the sprite */
+.actor.defense .speech {
+  top: 10%;
+  right: calc(100% - 12%);
+  left: auto;
+  bottom: auto;
+  transform: none;
+  margin: 0;
+  animation: pop-side-left 0.25s ease;
+}
+
+.actor.defense .speech::after {
+  right: -8px;
+  left: auto;
+  top: 28px;
+  bottom: auto;
+  transform: none;
+  border: 8px solid transparent;
+  border-left-color: var(--parchment);
+  border-top-color: transparent;
+}
+
+.actor.judge .speech {
+  width: min(320px, 42vw);
+  top: auto;
+  left: 50%;
+  right: auto;
+  bottom: 6%;
+  transform: translateX(-50%);
+  margin: 0;
+  animation: pop-judge 0.25s ease;
+}
+
+.actor.judge .speech::after {
+  left: 50%;
+  right: auto;
+  top: -8px;
+  bottom: auto;
+  transform: translateX(-50%);
+  border: 8px solid transparent;
+  border-bottom-color: var(--parchment);
+  border-top-color: transparent;
+}
+
+@keyframes pop-side {
+  from { transform: translateX(-8px) scale(0.94); opacity: 0; }
+  to { transform: translateX(0) scale(1); opacity: 1; }
+}
+
+@keyframes pop-side-left {
+  from { transform: translateX(8px) scale(0.94); opacity: 0; }
+  to { transform: translateX(0) scale(1); opacity: 1; }
+}
+
+@keyframes pop-judge {
+  from { transform: translateX(-50%) scale(0.92); opacity: 0; }
+  to { transform: translateX(-50%) scale(1); opacity: 1; }
 }
 
 .actor.judge {
@@ -358,6 +476,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .actor.defense.speaking { transform: translateY(-10px) scale(1.05); }
 
 .nametag {
+  position: relative;
+  z-index: 2;
   margin-top: -8px;
   padding: 6px 12px 8px;
   background: rgba(12, 14, 19, 0.78);
@@ -387,29 +507,21 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   box-shadow: 0 0 0 2px var(--crimson);
 }
 
-.speech {
-  position: absolute;
-  bottom: 92%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(280px, 70vw);
-  background: var(--parchment);
-  color: #1f1b17;
-  border-radius: 12px;
-  padding: 10px 12px 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  pointer-events: none;
-  animation: pop 0.25s ease;
+.actor img {
+  position: relative;
+  z-index: 1;
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  -webkit-mask-image: radial-gradient(ellipse 72% 88% at 50% 52%, #000 66%, transparent 88%);
+  mask-image: radial-gradient(ellipse 72% 88% at 50% 52%, #000 66%, transparent 88%);
 }
 
 .speech::after {
   content: "";
   position: absolute;
-  left: 50%;
-  bottom: -8px;
-  transform: translateX(-50%);
-  border: 8px solid transparent;
-  border-top-color: var(--parchment);
 }
 
 .speech-who {
@@ -424,27 +536,11 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .speech p {
   margin: 0;
   font-size: 13px;
-  line-height: 1.35;
-  max-height: 7.2em;
-  overflow: hidden;
-}
-
-.actor.judge .speech {
-  width: min(340px, 50vw);
-  bottom: auto;
-  top: 88%;
-}
-
-.actor.judge .speech::after {
-  top: -8px;
-  bottom: auto;
-  border-top-color: transparent;
-  border-bottom-color: var(--parchment);
-}
-
-@keyframes pop {
-  from { transform: translateX(-50%) scale(0.92); opacity: 0; }
-  to { transform: translateX(-50%) scale(1); opacity: 1; }
+  line-height: 1.4;
+  max-height: none;
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .jury-rail {
@@ -544,10 +640,19 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .slip.you .who { color: #4b4641; }
 .slip.system, .slip.error {
   align-self: center;
-  border: 1px dashed var(--outline);
-  background: transparent;
+  border: 1px solid rgba(201, 162, 39, 0.45);
+  background: rgba(58, 42, 16, 0.55);
   font-size: 13px;
-  color: var(--dust);
+  color: var(--parchment);
+  max-width: 92%;
+}
+.slip.error {
+  border-color: rgba(255, 180, 140, 0.55);
+  background: rgba(58, 28, 18, 0.72);
+  color: #ffe8d6;
+}
+.slip.error .who {
+  color: #ffc9a8;
 }
 
 .who {
@@ -719,9 +824,24 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
     bottom: 0;
   }
 
-  .speech {
-    width: min(220px, 88%);
+  .actor.prosecution .speech {
+    top: 6%;
+    left: 72%;
+    width: min(280px, 48vw);
+    max-width: 48vw;
+  }
+
+  .actor.defense .speech {
+    top: 6%;
+    right: 72%;
+    width: min(280px, 48vw);
+    max-width: 48vw;
+  }
+
+  .speech p {
     font-size: 12px;
+    max-height: none;
+    overflow: visible;
   }
 
   .jury-rail {
@@ -783,11 +903,27 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   .nametag { min-width: 0; padding: 4px 8px 6px; }
   .nametag strong { font-size: 12px; }
 
-  .speech {
-    width: min(160px, 92%);
+  .actor.prosecution .speech,
+  .actor.defense .speech {
+    top: 4%;
+    width: min(200px, 46vw);
+    max-width: 46vw;
     padding: 8px;
   }
-  .speech p { font-size: 12px; max-height: 5.4em; }
+
+  .actor.prosecution .speech {
+    left: 58%;
+  }
+
+  .actor.defense .speech {
+    right: 58%;
+  }
+
+  .speech p {
+    font-size: 11px;
+    max-height: none;
+    overflow: visible;
+  }
 
   .rail-actions,
   .direct-toggle,

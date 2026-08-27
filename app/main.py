@@ -23,7 +23,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
-load_dotenv()
+# override=True so --reload picks up a restored OPENAI_API_KEY from .env
+load_dotenv(override=True)
 
 
 def _is_production() -> bool:
@@ -496,12 +497,18 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
                         payload={"detail": e.errors(include_context=False, include_url=False)},
                     ).model_dump(),
                 )
-            except Exception:
+            except Exception as e:
                 logger.exception("ws handler error game_id=%s", game_id)
+                msg = str(e).lower()
+                detail = (
+                    "llm_unavailable"
+                    if "openai_api_key" in msg or "api key is missing" in msg
+                    else "internal_error"
+                )
                 await manager.send_to_player(
                     game_id,
                     player_id,
-                    WSOutgoing(type="error", payload={"detail": "internal_error"}).model_dump(),
+                    WSOutgoing(type="error", payload={"detail": detail}).model_dump(),
                 )
 
     except WebSocketDisconnect:

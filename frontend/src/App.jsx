@@ -13,6 +13,110 @@ const API_WS =
 
 const STORAGE_KEY = "courtroom_session";
 
+/** Map API / WS error payloads to a single juror-facing warning. */
+function formatWarning(detail, cooldown) {
+  const raw = detail;
+  let code = raw;
+  if (raw && typeof raw === "object") {
+    if (typeof raw.detail === "string") code = raw.detail;
+    else if (Array.isArray(raw.detail) || Array.isArray(raw)) code = "validation_error";
+    else code = JSON.stringify(raw);
+  }
+  code = String(code ?? "unknown").trim();
+
+  // Strip JSON quotes / FastAPI detail wrappers: {"detail":"rate_limited"}
+  const unquoted = code.replace(/^"+|"+$/g, "");
+  try {
+    const parsed = JSON.parse(code);
+    if (typeof parsed === "string") code = parsed;
+    else if (parsed && typeof parsed.detail === "string") code = parsed.detail;
+    else if (Array.isArray(parsed)) code = "validation_error";
+  } catch {
+    code = unquoted;
+  }
+
+  const wait =
+    typeof cooldown === "number" && cooldown > 0
+      ? ` Please wait about ${cooldown} second${cooldown === 1 ? "" : "s"}.`
+      : "";
+
+  const messages = {
+    llm_unavailable:
+      "Counsel cannot speak until the court has a valid OpenAI API key in .env. Add the key, then restart the server.",
+    internal_error:
+      "The court ran into an unexpected problem. Please try that action again in a moment.",
+    history_failed:
+      "The court could not restore the trial transcript. Refresh or rejoin the session.",
+    rate_limited: `The court asks you to slow down.${wait || " Please wait a few seconds before trying again."}`,
+    unauthorized:
+      "Your seat in this gallery is no longer valid. Rejoin the docket from the home screen.",
+    "game not found":
+      "This docket could not be found. Check the session id, or open a new court.",
+    validation_error:
+      "That request was incomplete or invalid. Check your question or vote and try again.",
+    game_full: "This gallery is full. Join another docket or open a new court.",
+    "scenario not found": "That case file is not on the docket. Choose another scenario.",
+    "WebSocket error":
+      "The live connection to the court faltered. Check your network, then re-enter the courtroom.",
+    Disconnected:
+      "You were disconnected from the courtroom. Re-enter when you are ready to continue.",
+    "Failed to fetch":
+      "Could not reach the court server. Check that the API is running, then try again.",
+    NetworkError:
+      "Could not reach the court server. Check your connection and try again.",
+  };
+
+  const lower = String(code).toLowerCase();
+  for (const [key, msg] of Object.entries(messages)) {
+    if (lower === key.toLowerCase() || lower.includes(key.toLowerCase())) {
+      return msg;
+    }
+  }
+
+  // HTTP-ish bodies or unknown codes → generic, never dump raw JSON
+  if (
+    lower.startsWith("{") ||
+    lower.startsWith("[") ||
+    lower.includes("traceback") ||
+    lower.includes("exception")
+  ) {
+    return "Something went wrong in the courtroom. Please try again.";
+  }
+
+  // Short human-ish strings from the API can pass through; otherwise generic
+  if (code.length <= 120 && !/[_-]{2,}/.test(code) && /[a-zA-Z]/.test(code) && !/^\w+$/.test(code)) {
+    return code;
+  }
+
+  return "Something went wrong in the courtroom. Please try again.";
+}
+
+async function readHttpWarning(res) {
+  let body = "";
+  try {
+    body = await res.text();
+  } catch {
+    body = "";
+  }
+  let detail = body;
+  try {
+    const parsed = JSON.parse(body);
+    detail = parsed.detail ?? parsed;
+  } catch {
+    /* keep raw text */
+  }
+  if (res.status === 429) return formatWarning("rate_limited");
+  if (res.status === 404) {
+    return formatWarning(
+      typeof detail === "string" && detail.toLowerCase().includes("scenario")
+        ? "scenario not found"
+        : "game not found"
+    );
+  }
+  if (res.status === 403) return formatWarning("game_full");
+  return formatWarning(detail);
+}
+
 function loadSession() {
   try {
     return JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null");
@@ -59,7 +163,7 @@ function App() {
         setScenarios(list);
         if (list[0]) setScenarioId(list[0].id);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(formatWarning(e.message || e || "Failed to load scenarios")));
 
     const sess = loadSession();
     if (sess?.gameId && sess?.playerId) {
@@ -77,7 +181,7 @@ function App() {
     const poll = async () => {
       try {
         const res = await fetch(`${API_HTTP}/games/${gameId}/state`);
-        if (!res.ok) throw new Error(await res.text());
+        if (!res.ok) throw new Error(await readHttpWarning(res));
         const data = await res.json();
         if (!cancelled) {
           setLobby(data);
@@ -95,7 +199,7 @@ function App() {
           }
         }
       } catch (e) {
-        if (!cancelled) setError(String(e.message || e));
+        if (!cancelled) setError(formatWarning(e.message || e));
       }
     };
     poll();
@@ -183,13 +287,21 @@ function App() {
       } else if (data.type === "error") {
         pushMessage({
           role: "error",
-          text: JSON.stringify(data.payload?.detail ?? data.payload),
+          text: formatWarning(data.payload?.detail ?? data.payload, data.payload?.cooldown),
         });
       }
     };
 
-    ws.onerror = () => pushMessage({ role: "error", text: "WebSocket error" });
-    ws.onclose = () => pushMessage({ role: "system", text: "Disconnected" });
+    ws.onerror = () =>
+      pushMessage({
+        role: "error",
+        text: formatWarning("WebSocket error"),
+      });
+    ws.onclose = () =>
+      pushMessage({
+        role: "system",
+        text: "Connection closed. Re-enter the courtroom if you need to continue.",
+      });
 
     return () => {
       ws.close();
@@ -213,14 +325,14 @@ function App() {
           expected_players: Number(expectedPlayers) || 1,
         }),
       });
-      if (!create.ok) throw new Error(await create.text());
+      if (!create.ok) throw new Error(await readHttpWarning(create));
       const game = await create.json();
       const join = await fetch(`${API_HTTP}/games/${game.game_id}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ player_name: playerName }),
       });
-      if (!join.ok) throw new Error(await join.text());
+      if (!join.ok) throw new Error(await readHttpWarning(join));
       const player = await join.json();
       setGameId(game.game_id);
       setPlayerId(player.player_id);
@@ -228,7 +340,7 @@ function App() {
       setLobby({ ...game, status: "lobby", players: [playerName] });
       setScreen("lobby");
     } catch (e) {
-      setError(String(e.message || e));
+      setError(formatWarning(e.message || e));
     } finally {
       setBusy(false);
     }
@@ -244,14 +356,14 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ player_name: playerName }),
       });
-      if (!join.ok) throw new Error(await join.text());
+      if (!join.ok) throw new Error(await readHttpWarning(join));
       const player = await join.json();
       setGameId(gid);
       setPlayerId(player.player_id);
       saveSession({ gameId: gid, playerId: player.player_id, playerName });
       setScreen("lobby");
     } catch (e) {
-      setError(String(e.message || e));
+      setError(formatWarning(e.message || e));
     } finally {
       setBusy(false);
     }

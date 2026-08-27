@@ -20,14 +20,16 @@ function Actor({ className, src, name, role, speaking, bubble, onSelect, selecta
           : undefined
       }
     >
-      {bubble ? (
-        <div className="speech">
-          <span className="speech-who">{name || role}</span>
-          <p>{bubble}</p>
-        </div>
-      ) : null}
       <div className="sprite-wrap">
-        <img src={src} alt={name || role} />
+        {bubble ? (
+          <div className="speech">
+            <span className="speech-who">{name || role}</span>
+            <p>{bubble}</p>
+          </div>
+        ) : null}
+        <div className="sprite-figure">
+          <img src={src} alt={name || role} />
+        </div>
       </div>
       <div className="nametag">
         <span>{role}</span>
@@ -62,7 +64,7 @@ export default function Courtroom({
       const idx = t.indexOf("\nA:");
       if (idx >= 0) t = t.slice(idx + 3).trim();
     }
-    return t.length > 280 ? `${t.slice(0, 277)}…` : t;
+    return t;
   };
 
   const lastSystem = [...messages]
@@ -168,11 +170,15 @@ export default function Courtroom({
                 <span className="who">
                   {m.role === "you"
                     ? "You (juror)"
-                    : m.agentId === "prosecution"
-                      ? lobby?.prosecution?.name || "Prosecution"
-                      : m.agentId === "defense"
-                        ? lobby?.defense?.name || "Defense"
-                        : m.role}
+                    : m.role === "error"
+                      ? "Court notice"
+                      : m.agentId === "prosecution"
+                        ? lobby?.prosecution?.name || "Prosecution"
+                        : m.agentId === "defense"
+                          ? lobby?.defense?.name || "Defense"
+                          : m.role === "system"
+                            ? "Clerk"
+                            : m.role}
                 </span>
                 <p>{m.text}</p>
               </div>

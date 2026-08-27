@@ -22,7 +22,7 @@ app/
   models.py            Courtroom GameState + WS schemas
   scenarios.py         Loader / public views
   public_views.py      Serialization that never leaks secrets early
-  llm.py               OpenAI / Ollama routing
+  llm.py               OpenAI counsel calls
   redis_state.py       Lobby state, TTL, rate limits, pub/sub publish
   ws_manager.py        Local sockets + Redis pub/sub fan-out
   agents/counsel_agent.py
@@ -41,7 +41,6 @@ pip install -r requirements.txt
 cp .env.example .env   # set OPENAI_API_KEY (required)
 brew services start redis && redis-cli ping
 
-# Optional: ollama serve && ollama pull llama3.2  (defense; OpenAI is used if Ollama is down)
 uvicorn app.main:app --reload
 cd frontend && npm install && npm run dev
 ```
@@ -58,8 +57,8 @@ python scripts/load_test.py --games 10 --players 2 --debate 2
 
 | Role | Default |
 |------|---------|
-| Prosecution | OpenAI (`OPENAI_SUSPECT_MODEL`) |
-| Defense | Ollama → OpenAI fallback |
+| Prosecution | OpenAI (`OPENAI_COUNSEL_MODEL`, slightly lower temperature) |
+| Defense | Same OpenAI model, slightly higher temperature |
 
 ## Phases 4–6 features
 
@@ -76,6 +75,23 @@ python scripts/load_test.py --games 10 --players 2 --debate 2
 ```bash
 pytest -q
 ```
+
+## Docker / host
+
+One container serves the API, WebSocket, and built UI. Redis is separate.
+
+Local:
+
+```bash
+cp .env.example .env   # set OPENAI_API_KEY
+docker compose up --build
+```
+
+Open http://localhost:8080
+
+**Render:** this repo includes `render.yaml`. In the [Render dashboard](https://dashboard.render.com) choose **New → Blueprint**, point it at the GitHub repo, and set `OPENAI_API_KEY` when prompted. After deploy, the public URL is the game.
+
+**VPS:** copy the repo, set `.env`, run `docker compose up --build -d`, put a TLS reverse proxy in front of port 8080.
 
 ## Levels shipped
 

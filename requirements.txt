@@ -4,7 +4,6 @@ langgraph>=0.2
 langgraph-checkpoint-sqlite>=2.0
 langchain-core>=0.3
 langchain-openai>=0.2
-langchain-ollama>=0.2
 redis>=5.0
 pydantic>=2.7
 python-dotenv>=1.0

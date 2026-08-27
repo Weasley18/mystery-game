@@ -2,7 +2,7 @@
 """
 Async load test for the courtroom game API.
 
-Requires Redis + a running API (real OpenAI/Ollama).
+Requires Redis + a running API (real OpenAI).
 
 Usage:
   uvicorn app.main:app --port 8000 &

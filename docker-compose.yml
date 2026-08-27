@@ -1,0 +1,23 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CHECKPOINT_DB: /data/checkpoints.db
+      FRONTEND_DIST: /app/frontend/dist
+    volumes:
+      - checkpoint-data:/data
+    depends_on:
+      - redis
+    ports:
+      - "8080:8000"
+
+volumes:
+  checkpoint-data:

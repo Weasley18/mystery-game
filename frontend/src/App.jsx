@@ -2,8 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import Courtroom from "./Courtroom.jsx";
 
-const API_HTTP = import.meta.env.VITE_API_HTTP || "http://127.0.0.1:8000";
-const API_WS = import.meta.env.VITE_API_WS || "ws://127.0.0.1:8000";
+const API_HTTP =
+  import.meta.env.VITE_API_HTTP ??
+  (import.meta.env.DEV ? "http://127.0.0.1:8000" : "");
+const API_WS =
+  import.meta.env.VITE_API_WS ??
+  (import.meta.env.DEV
+    ? "ws://127.0.0.1:8000"
+    : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`);
 
 const STORAGE_KEY = "courtroom_session";
 

@@ -85,6 +85,7 @@ export default function Courtroom({
       <div className="court-bg" aria-hidden="true" />
       <div className="court-vignette" aria-hidden="true" />
 
+      <div className="gallery">
       <div className="bench">
         <Actor
           className="judge"
@@ -132,6 +133,7 @@ export default function Courtroom({
         selectable={status === "questioning"}
         onSelect={() => setAgentId("defense")}
       />
+      </div>
 
       <div className="jury-rail">
         <div className="rail-head">

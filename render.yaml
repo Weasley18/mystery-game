@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: courtroom
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_COUNSEL_MODEL
+        value: gpt-4o-mini
+      - key: FRONTEND_DIST
+        value: /app/frontend/dist
+      - key: CHECKPOINT_DB
+        value: /tmp/checkpoints.db
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: courtroom-redis
+          property: connectionString
+  - type: redis
+    name: courtroom-redis
+    ipAllowList: []

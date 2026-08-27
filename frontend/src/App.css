@@ -258,6 +258,16 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   pointer-events: none;
 }
 
+.gallery {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.gallery .actor.selectable {
+  pointer-events: auto;
+}
+
 .actor {
   position: absolute;
   z-index: 4;
@@ -646,24 +656,162 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 
 @media (max-width: 980px) {
-  .docket, .lobby-grid, .topbar { grid-template-columns: 1fr; }
-  .topbar { height: auto; padding: 12px 0; }
-  .app.in-session .topbar { position: relative; background: var(--ink); }
-  .courtroom { height: auto; min-height: 100vh; overflow: visible; }
-  .actor.prosecution, .actor.defense {
-    position: relative;
-    left: auto;
-    right: auto;
-    bottom: auto;
-    width: 46%;
-    height: 280px;
-    display: inline-flex;
+  .app.antechamber {
+    padding: 0 16px calc(24px + env(safe-area-inset-bottom));
   }
-  .actor.judge, .actor.defendant { display: none; }
+
+  .docket,
+  .lobby-grid,
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    height: auto;
+    padding: 12px 0;
+    gap: 8px;
+    text-align: center;
+  }
+
+  .juror-meta { text-align: center; }
+
+  .app.in-session .topbar {
+    position: relative;
+    background: var(--ink);
+    padding: 10px 12px;
+    padding-top: max(10px, env(safe-area-inset-top));
+  }
+
+  .hero h2 { font-size: 32px; max-width: none; }
+
+  .courtroom {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .gallery {
+    position: relative;
+    inset: auto;
+    height: min(48vh, 380px);
+    flex: none;
+  }
+
+  .actor.judge {
+    width: 28%;
+    height: 42%;
+    top: 2%;
+  }
+
+  .actor.defendant {
+    width: 20%;
+    height: 48%;
+    top: 18%;
+    left: 36%;
+  }
+
+  .actor.prosecution,
+  .actor.defense {
+    width: 48%;
+    height: 82%;
+    bottom: 0;
+  }
+
+  .speech {
+    width: min(220px, 88%);
+    font-size: 12px;
+  }
+
   .jury-rail {
     position: relative;
     max-height: none;
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
   }
-  .rail-body, .composer { grid-template-columns: 1fr; }
-  .hero h2 { font-size: 32px; }
+
+  .rail-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .rail-actions {
+    width: 100%;
+  }
+
+  .rail-actions button {
+    flex: 1;
+    min-height: 44px;
+  }
+
+  .rail-body,
+  .composer {
+    grid-template-columns: 1fr;
+  }
+
+  .record-strip,
+  .exhibits-card {
+    max-height: 28vh;
+  }
+}
+
+@media (max-width: 640px) {
+  .app.antechamber { padding-left: 12px; padding-right: 12px; }
+
+  .hero h2 { font-size: 28px; }
+
+  .case-card,
+  .session-card,
+  .file,
+  .counsel {
+    padding: 14px;
+  }
+
+  .lobby-sprite { height: 120px; }
+
+  .actor.judge,
+  .actor.defendant { display: none; }
+
+  .gallery { height: 34vh; }
+
+  .actor.prosecution,
+  .actor.defense {
+    width: 50%;
+    height: 100%;
+  }
+
+  .nametag { min-width: 0; padding: 4px 8px 6px; }
+  .nametag strong { font-size: 12px; }
+
+  .speech {
+    width: min(160px, 92%);
+    padding: 8px;
+  }
+  .speech p { font-size: 12px; max-height: 5.4em; }
+
+  .rail-actions,
+  .direct-toggle,
+  .deliberation-bar {
+    flex-wrap: wrap;
+  }
+
+  .rail-actions button,
+  .direct-toggle button,
+  .composer .primary,
+  .deliberation-bar button,
+  .session-card .primary,
+  .session-card .secondary,
+  .file .primary,
+  .file .secondary {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .direct-toggle { width: 100%; }
+  .direct-toggle button { flex: 1; }
+
+  .mega { font-size: 56px; }
+  .verdict-sheet { padding: 28px 18px; }
+
+  .topbar .brand h1 { font-size: 18px; }
 }

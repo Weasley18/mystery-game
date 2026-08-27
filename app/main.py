@@ -13,13 +13,33 @@ from __future__ import annotations
 
 import os
 import uuid
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 load_dotenv()
+
+
+def _cors_origins() -> list[str]:
+    raw = (os.getenv("CORS_ORIGINS") or "").strip()
+    if raw == "*":
+        return ["*"]
+    extra = [o.strip() for o in raw.split(",") if o.strip()]
+    defaults = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://localhost",
+        "http://127.0.0.1",
+    ]
+    return extra or defaults
 
 from app.models import (
     CreateGameRequest,
@@ -48,18 +68,19 @@ from app.ids import new_game_id
 from app.ws_manager import manager
 app = FastAPI(title="AI Courtroom Mystery")
 
+_origins = _cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
+    allow_origins=_origins,
+    allow_credentials="*" not in _origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/health")
+async def health():
+    return {"ok": True}
 
 
 async def _sync_public_from_graph(game_id: str, result: dict) -> None:
@@ -373,3 +394,8 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
 
     except WebSocketDisconnect:
         manager.disconnect(game_id, player_id)
+
+
+_dist = Path(os.getenv("FRONTEND_DIST") or "frontend/dist")
+if _dist.is_dir():
+    app.mount("/", StaticFiles(directory=str(_dist), html=True), name="spa")

@@ -1,15 +1,13 @@
 """
 Counsel agents: prosecution and defense argue / answer questions in character.
-
-Prosecution uses hosted OpenAI; defense uses Ollama with OpenAI fallback
-(see app.llm.invoke_suspect_llm — is_killer=True maps to OpenAI path).
+Both sides use hosted OpenAI (`invoke_counsel_llm`).
 """
 
 from __future__ import annotations
 
 import re
 
-from app.llm import invoke_suspect_llm
+from app.llm import invoke_counsel_llm
 from app.models import Case, Counsel
 
 _HISTORY_TURN_CAP = 10
@@ -84,7 +82,6 @@ def counsel_speak(
     player_text: str | None = None,
 ) -> str:
     counsel: Counsel = case[role]  # type: ignore[literal-required]
-    use_openai = role == "prosecution"
 
     template = _ARGUE_SYSTEM if mode == "argue" else _QA_SYSTEM
     system = template.format(
@@ -109,5 +106,5 @@ def counsel_speak(
     else:
         messages.append({"role": "user", "content": player_text or ""})
 
-    raw = invoke_suspect_llm(use_openai, messages)
+    raw = invoke_counsel_llm(messages, role=role)
     return _filter_output(raw, case)

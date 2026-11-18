@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from app.models import Case, GameState
+from app.models import Case, GameState, MAX_QUESTIONS_PER_GAME
 from app.scenarios import public_counsel
+
+
+def count_questions_in_transcript(transcript: list | None) -> int:
+    return sum(1 for e in (transcript or []) if e.get("kind") == "qa")
 
 
 SECRET_KEYS = frozenset({
@@ -35,6 +39,7 @@ def build_public_state(
     majority: str | None = None,
     correct: bool | None = None,
     vote_reason: str | None = None,
+    questions_asked: int = 0,
 ) -> dict:
     revealed = evidence_revealed or []
     payload = {
@@ -52,6 +57,8 @@ def build_public_state(
         "evidence_revealed": evidence_public(case, revealed),
         "vote_count": vote_count,
         "expected_voters": expected_voters,
+        "questions_asked": int(questions_asked),
+        "max_questions": MAX_QUESTIONS_PER_GAME,
     }
     if status == "finished":
         payload["majority"] = majority
@@ -66,6 +73,7 @@ def history_payload(state: GameState) -> dict:
     """Reconnect payload — transcript + revealed evidence; no secrets."""
     case = state["case"]
     revealed = state.get("evidence_revealed") or []
+    asked = count_questions_in_transcript(state.get("transcript"))
     return {
         "status": state.get("status"),
         "debate_round": state.get("debate_round", 0),
@@ -73,6 +81,8 @@ def history_payload(state: GameState) -> dict:
         "evidence_revealed": evidence_public(case, revealed),
         "vote_count": len(state.get("votes") or {}),
         "expected_voters": state.get("expected_players", 1),
+        "questions_asked": asked,
+        "max_questions": MAX_QUESTIONS_PER_GAME,
         "majority": state.get("majority") if state.get("status") == "finished" else None,
         "correct": state.get("correct") if state.get("status") == "finished" else None,
         "solution": case["solution"] if state.get("status") == "finished" else None,

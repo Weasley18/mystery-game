@@ -2,7 +2,10 @@
 FastAPI entrypoint — courtroom mystery game.
 
 Routes:
-    GET  /scenarios                list authored levels
+    POST /auth/signup              create account
+    POST /auth/login               issue session token
+    GET  /auth/me                  current juror + progress
+    GET  /scenarios                list authored levels (unlocked flags when authed)
     POST /games                    create a game from scenario_id
     POST /games/{game_id}/join     add a player
     GET  /games/{game_id}/state    public lobby / reconnect state
@@ -13,13 +16,13 @@ from __future__ import annotations
 
 import logging
 import os
-import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
@@ -64,25 +67,49 @@ def _cors_origins() -> list[str]:
         return ["*"]
     return [o.strip() for o in stripped.split(",") if o.strip()]
 
+from app.accounts import (
+    authenticate,
+    cleared_levels,
+    create_user,
+    credit_level_clears,
+    get_user,
+    is_level_unlocked,
+    issue_token,
+    max_cleared_level,
+    verify_token,
+)
 from app.models import (
+    AuthResponse,
     CreateGameRequest,
     CreateGameResponse,
     JoinGameRequest,
     JoinGameResponse,
+    LoginRequest,
+    SignupRequest,
     GameState,
+    MAX_QUESTIONS_PER_GAME,
     WSIncoming,
     WSOutgoing,
 )
 from app.scenarios import list_scenarios, load_scenario, public_case_view
-from app.public_views import build_public_state, history_payload
+from app.public_views import (
+    build_public_state,
+    count_questions_in_transcript,
+    history_payload,
+)
 from app.graph.game_graph import turn_graph
+from app.graph.nodes import count_questions
 from app.redis_state import (
     save_public_state,
     get_public_state,
     add_player,
     get_players,
+    get_player_name,
+    get_player_user_ids,
     player_count,
     player_exists,
+    append_team_chat,
+    get_team_chat,
     check_rate_limit,
     check_ip_rate_limit,
     QUESTION_COOLDOWN_SECONDS,
@@ -99,6 +126,7 @@ from app.redis_state import (
 )
 from app.ids import new_game_id, new_player_id
 from app.ws_manager import manager
+
 logger = logging.getLogger(__name__)
 _prod = _is_production()
 app = FastAPI(
@@ -116,6 +144,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_bearer = HTTPBearer(auto_error=False)
 
 
 def _client_ip(request: Request | WebSocket) -> str:
@@ -144,13 +174,84 @@ def _ws_origin_allowed(ws: WebSocket) -> bool:
     return False
 
 
+async def require_user(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> dict:
+    token = creds.credentials if creds else None
+    if not token:
+        raise HTTPException(401, "login_required")
+    user_id = verify_token(token)
+    if not user_id:
+        raise HTTPException(401, "invalid_token")
+    user = get_user(user_id)
+    if not user:
+        raise HTTPException(401, "invalid_token")
+    return user
+
+
+async def optional_user(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> dict | None:
+    token = creds.credentials if creds else None
+    if not token:
+        return None
+    user_id = verify_token(token)
+    if not user_id:
+        return None
+    return get_user(user_id)
+
+
+def _auth_payload(user: dict) -> AuthResponse:
+    clears = sorted(cleared_levels(user["id"]))
+    max_cleared = max_cleared_level(user["id"])
+    return AuthResponse(
+        token=issue_token(user["id"]),
+        user_id=user["id"],
+        username=user["username"],
+        cleared_levels=clears,
+        max_unlocked_level=max_cleared + 1,
+    )
+
+
 @app.get("/health")
 async def health():
     return {"ok": True}
 
 
+@app.post("/auth/signup", response_model=AuthResponse)
+async def signup(req: SignupRequest, request: Request):
+    ip = _client_ip(request)
+    if not await check_ip_rate_limit(ip, "auth", IP_CREATE_LIMIT, IP_CREATE_WINDOW):
+        raise HTTPException(429, "rate_limited")
+    try:
+        user = create_user(req.username, req.password)
+    except ValueError as e:
+        msg = str(e)
+        if "already taken" in msg:
+            raise HTTPException(409, "username_taken") from e
+        raise HTTPException(400, msg) from e
+    return _auth_payload(user)
+
+
+@app.post("/auth/login", response_model=AuthResponse)
+async def login(req: LoginRequest, request: Request):
+    ip = _client_ip(request)
+    if not await check_ip_rate_limit(ip, "auth", IP_JOIN_LIMIT, IP_JOIN_WINDOW):
+        raise HTTPException(429, "rate_limited")
+    user = authenticate(req.username, req.password)
+    if not user:
+        raise HTTPException(401, "invalid_credentials")
+    return _auth_payload(user)
+
+
+@app.get("/auth/me", response_model=AuthResponse)
+async def me(user: dict = Depends(require_user)):
+    return _auth_payload(user)
+
+
 async def _sync_public_from_graph(game_id: str, result: dict) -> None:
     case = result["case"]
+    asked = count_questions_in_transcript(result.get("transcript"))
     pub = build_public_state(
         case,
         status=result.get("status", "lobby"),
@@ -161,17 +262,39 @@ async def _sync_public_from_graph(game_id: str, result: dict) -> None:
         majority=result.get("majority"),
         correct=result.get("correct"),
         vote_reason=result.get("vote_reason"),
+        questions_asked=asked,
     )
     await save_public_state(game_id, pub)
 
 
+async def _credit_clears_if_won(game_id: str, result: dict) -> list[str]:
+    """If majority matched truth, credit every seated account. Returns newly unlocked scenario ids' next level hint."""
+    if result.get("status") != "finished" or not result.get("correct"):
+        return []
+    case = result["case"]
+    user_ids = await get_player_user_ids(game_id)
+    newly = credit_level_clears(user_ids, int(case["level"]), case["scenario_id"])
+    return newly
+
+
 @app.get("/scenarios")
-async def scenarios():
-    return list_scenarios()
+async def scenarios(user: dict | None = Depends(optional_user)):
+    items = list_scenarios()
+    if user is None:
+        for s in items:
+            s["unlocked"] = s["level"] <= 1
+        return items
+    for s in items:
+        s["unlocked"] = is_level_unlocked(user["id"], s["level"])
+    return items
 
 
 @app.post("/games", response_model=CreateGameResponse)
-async def create_game(req: CreateGameRequest, request: Request):
+async def create_game(
+    req: CreateGameRequest,
+    request: Request,
+    user: dict = Depends(require_user),
+):
     ip = _client_ip(request)
     if not await check_ip_rate_limit(ip, "create", IP_CREATE_LIMIT, IP_CREATE_WINDOW):
         raise HTTPException(429, "rate_limited")
@@ -183,6 +306,9 @@ async def create_game(req: CreateGameRequest, request: Request):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+    if not is_level_unlocked(user["id"], case["level"]):
+        raise HTTPException(403, "level_locked")
+
     game_id = new_game_id()
     expected = min(max(1, req.expected_players), MAX_EXPECTED_PLAYERS)
 
@@ -192,6 +318,7 @@ async def create_game(req: CreateGameRequest, request: Request):
             case,
             status="lobby",
             expected_voters=expected,
+            questions_asked=0,
         ),
     )
 
@@ -233,21 +360,34 @@ async def create_game(req: CreateGameRequest, request: Request):
 
 
 @app.post("/games/{game_id}/join", response_model=JoinGameResponse)
-async def join_game(game_id: str, req: JoinGameRequest, request: Request):
+async def join_game(
+    game_id: str,
+    req: JoinGameRequest,
+    request: Request,
+    user: dict = Depends(require_user),
+):
     ip = _client_ip(request)
     if not await check_ip_rate_limit(ip, "join", IP_JOIN_LIMIT, IP_JOIN_WINDOW):
         raise HTTPException(429, "rate_limited")
 
-    if await get_public_state(game_id) is None:
+    pub = await get_public_state(game_id)
+    if pub is None:
         raise HTTPException(404, "game not found")
+
+    level = int(pub.get("level") or 1)
+    if not is_level_unlocked(user["id"], level):
+        raise HTTPException(403, "level_locked")
 
     count = await player_count(game_id)
     if count >= MAX_PLAYERS_PER_GAME:
         raise HTTPException(403, "game is full")
 
+    player_name = req.player_name or user["username"]
     player_id = new_player_id()
-    await add_player(game_id, player_id, req.player_name)
-    return JoinGameResponse(player_id=player_id, game_id=game_id)
+    await add_player(game_id, player_id, player_name, user_id=user["id"])
+    return JoinGameResponse(
+        player_id=player_id, game_id=game_id, player_name=player_name
+    )
 
 
 @app.get("/games/{game_id}/state")
@@ -285,16 +425,19 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
     await manager.connect(game_id, player_id, ws)
     config = {"configurable": {"thread_id": game_id}}
     client_ip = _client_ip(ws)
+    seat_name = await get_player_name(game_id, player_id) or "Juror"
 
-    # Reconnect: replay history from checkpoint
+    # Reconnect: replay history from checkpoint + team chat
     try:
         snap = turn_graph.get_state(config)
         values = snap.values if snap else None
         if values and values.get("case"):
+            hist = history_payload(values)
+            hist["team_chat"] = await get_team_chat(game_id)
             await manager.send_to_player(
                 game_id,
                 player_id,
-                WSOutgoing(type="history", payload=history_payload(values)).model_dump(),
+                WSOutgoing(type="history", payload=hist).model_dump(),
             )
     except Exception:
         logger.exception("history replay failed game_id=%s", game_id)
@@ -312,8 +455,58 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
                 payload = incoming.model_dump()
                 payload["player_id"] = player_id
 
+                # Team chat — never enters the counsel graph / transcript
+                if incoming.type == "team_chat":
+                    allowed = await check_rate_limit(
+                        game_id, player_id, "team_chat", 1
+                    )
+                    if not allowed:
+                        await manager.send_to_player(
+                            game_id,
+                            player_id,
+                            WSOutgoing(
+                                type="error",
+                                payload={"detail": "rate_limited"},
+                            ).model_dump(),
+                        )
+                        continue
+                    stored = await append_team_chat(
+                        game_id,
+                        {
+                            "player_id": player_id,
+                            "player_name": seat_name,
+                            "text": incoming.text,
+                        },
+                    )
+                    await manager.broadcast(
+                        game_id,
+                        WSOutgoing(type="team_chat", payload=stored).model_dump(),
+                    )
+                    continue
+
                 # Rate limits (per player + per IP for LLM-backed actions)
                 if incoming.type == "question":
+                    # Cap before LLM: count Q&A already on the transcript
+                    try:
+                        snap = turn_graph.get_state(config)
+                        values = snap.values if snap else None
+                        asked = count_questions(values) if values else 0
+                    except Exception:
+                        asked = 0
+                    if asked >= MAX_QUESTIONS_PER_GAME:
+                        await manager.send_to_player(
+                            game_id,
+                            player_id,
+                            WSOutgoing(
+                                type="error",
+                                payload={
+                                    "detail": "question_limit",
+                                    "questions_asked": asked,
+                                    "max_questions": MAX_QUESTIONS_PER_GAME,
+                                },
+                            ).model_dump(),
+                        )
+                        continue
                     if not await check_ip_rate_limit(
                         client_ip, "llm", IP_LLM_LIMIT, IP_LLM_WINDOW
                     ):
@@ -414,15 +607,35 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
                     )
 
                 elif incoming.type == "question":
+                    event = result.get("incoming_event") or {}
+                    if event.get("rejected") == "question_limit" or not result.get("pending_response"):
+                        asked = count_questions_in_transcript(result.get("transcript"))
+                        await manager.send_to_player(
+                            game_id,
+                            player_id,
+                            WSOutgoing(
+                                type="error",
+                                payload={
+                                    "detail": "question_limit",
+                                    "questions_asked": asked,
+                                    "max_questions": MAX_QUESTIONS_PER_GAME,
+                                },
+                            ).model_dump(),
+                        )
+                        continue
+                    asked = count_questions_in_transcript(result.get("transcript"))
+                    reply_payload = {
+                        "agent_id": incoming.agent_id,
+                        "text": result.get("pending_response"),
+                        "questions_asked": asked,
+                        "max_questions": MAX_QUESTIONS_PER_GAME,
+                    }
                     await manager.send_to_player(
                         game_id,
                         player_id,
                         WSOutgoing(
                             type="agent_reply",
-                            payload={
-                                "agent_id": incoming.agent_id,
-                                "text": result.get("pending_response"),
-                            },
+                            payload=reply_payload,
                         ).model_dump(),
                     )
                     # Broadcast Q&A so others see it
@@ -431,8 +644,7 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
                         WSOutgoing(
                             type="agent_reply",
                             payload={
-                                "agent_id": incoming.agent_id,
-                                "text": result.get("pending_response"),
+                                **reply_payload,
                                 "question": incoming.text,
                                 "player_id": player_id,
                             },
@@ -473,6 +685,8 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
                         ).model_dump(),
                     )
                     if result.get("status") == "finished":
+                        newly = await _credit_clears_if_won(game_id, result)
+                        level = int(result["case"]["level"])
                         await manager.broadcast(
                             game_id,
                             WSOutgoing(
@@ -485,6 +699,11 @@ async def game_socket(ws: WebSocket, game_id: str, player_id: str):
                                     "verdict_truth": result["case"]["verdict_truth"],
                                     "solution": result["case"]["solution"],
                                     "votes": result.get("votes"),
+                                    "level": level,
+                                    "level_cleared": bool(result.get("correct")),
+                                    "next_level_unlocked": bool(result.get("correct")),
+                                    "next_level": level + 1 if result.get("correct") else None,
+                                    "newly_credited": newly,
                                 },
                             ).model_dump(),
                         )

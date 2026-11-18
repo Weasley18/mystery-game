@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
+import time
 from typing import Optional
 
 import redis.asyncio as redis
@@ -45,12 +47,23 @@ def _players_key(game_id: str) -> str:
     return f"game:{game_id}:players"
 
 
+def _player_users_key(game_id: str) -> str:
+    return f"game:{game_id}:player_users"
+
+
+def _chat_key(game_id: str) -> str:
+    return f"game:{game_id}:chat"
+
+
 def _rate_key(game_id: str, player_id: str, action: str) -> str:
     return f"game:{game_id}:rate:{player_id}:{action}"
 
 
 def _ip_rate_key(bucket: str, ip: str) -> str:
     return f"rate:ip:{bucket}:{ip}"
+
+
+MAX_TEAM_CHAT_MESSAGES = int(os.getenv("MAX_TEAM_CHAT_MESSAGES", "100"))
 
 
 async def save_public_state(game_id: str, public_state: dict) -> None:
@@ -65,11 +78,20 @@ async def get_public_state(game_id: str) -> Optional[dict]:
     return json.loads(raw) if raw else None
 
 
-async def add_player(game_id: str, player_id: str, player_name: str) -> None:
+async def add_player(
+    game_id: str,
+    player_id: str,
+    player_name: str,
+    user_id: str | None = None,
+) -> None:
     r = get_redis()
     key = _players_key(game_id)
     await r.hset(key, player_id, player_name)
     await r.expire(key, GAME_TTL_SECONDS)
+    if user_id:
+        ukey = _player_users_key(game_id)
+        await r.hset(ukey, player_id, user_id)
+        await r.expire(ukey, GAME_TTL_SECONDS)
     # refresh public TTL too
     pub = _game_key(game_id)
     if await r.exists(pub):
@@ -81,6 +103,22 @@ async def get_players(game_id: str) -> dict[str, str]:
     return await r.hgetall(_players_key(game_id))
 
 
+async def get_player_user_ids(game_id: str) -> list[str]:
+    """Unique account ids seated in this gallery (may be empty for legacy seats)."""
+    r = get_redis()
+    mapping = await r.hgetall(_player_users_key(game_id))
+    seen: list[str] = []
+    for uid in mapping.values():
+        if uid and uid not in seen:
+            seen.append(uid)
+    return seen
+
+
+async def get_player_name(game_id: str, player_id: str) -> Optional[str]:
+    r = get_redis()
+    return await r.hget(_players_key(game_id), player_id)
+
+
 async def player_count(game_id: str) -> int:
     r = get_redis()
     return int(await r.hlen(_players_key(game_id)))
@@ -89,6 +127,35 @@ async def player_count(game_id: str) -> int:
 async def player_exists(game_id: str, player_id: str) -> bool:
     r = get_redis()
     return bool(await r.hexists(_players_key(game_id), player_id))
+
+
+async def append_team_chat(game_id: str, message: dict) -> dict:
+    """Append a team chat message; returns the stored message with id/ts."""
+    r = get_redis()
+    key = _chat_key(game_id)
+    stored = {
+        "id": message.get("id") or secrets.token_hex(8),
+        "player_id": message["player_id"],
+        "player_name": message.get("player_name") or "Juror",
+        "text": message["text"],
+        "ts": message.get("ts") or time.time(),
+    }
+    await r.rpush(key, json.dumps(stored))
+    await r.ltrim(key, -MAX_TEAM_CHAT_MESSAGES, -1)
+    await r.expire(key, GAME_TTL_SECONDS)
+    return stored
+
+
+async def get_team_chat(game_id: str) -> list[dict]:
+    r = get_redis()
+    raw_list = await r.lrange(_chat_key(game_id), 0, -1)
+    out: list[dict] = []
+    for raw in raw_list:
+        try:
+            out.append(json.loads(raw))
+        except (TypeError, json.JSONDecodeError):
+            continue
+    return out
 
 
 async def check_rate_limit(

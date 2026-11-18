@@ -20,6 +20,7 @@ COPY --from=frontend /web/dist ./frontend/dist
 ENV PYTHONUNBUFFERED=1 \
     CHECKPOINT_DB=/data/checkpoints.db \
     REDIS_URL=redis://redis:6379/0 \
+    REDIS_URL=redis://redis:6379/0 \
     FRONTEND_DIST=/app/frontend/dist
 
 RUN mkdir -p /data

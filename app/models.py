@@ -85,6 +85,27 @@ _SCENARIO_ID_RE = r"^[a-z0-9_]+$"
 MAX_PLAYER_NAME_LEN = 40
 MAX_QUESTION_LEN = 500
 MAX_EXPECTED_PLAYERS = 12
+MAX_QUESTIONS_PER_GAME = 7
+MAX_TEAM_CHAT_LEN = 280
+MAX_USERNAME_LEN = 40
+
+
+class SignupRequest(BaseModel):
+    username: str = Field(..., min_length=2, max_length=MAX_USERNAME_LEN)
+    password: str = Field(..., min_length=6, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=MAX_USERNAME_LEN)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user_id: str
+    username: str
+    cleared_levels: list[int]
+    max_unlocked_level: int
 
 
 class CreateGameRequest(BaseModel):
@@ -106,20 +127,24 @@ class CreateGameResponse(BaseModel):
 
 
 class JoinGameRequest(BaseModel):
-    player_name: str = Field(..., min_length=1, max_length=MAX_PLAYER_NAME_LEN)
+    """player_name is optional when authenticated — server uses account username."""
+    player_name: Optional[str] = Field(default=None, max_length=MAX_PLAYER_NAME_LEN)
 
     @field_validator("player_name")
     @classmethod
-    def strip_name(cls, v: str) -> str:
+    def strip_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
         name = v.strip()
         if not name:
-            raise ValueError("player_name is required")
+            raise ValueError("player_name cannot be blank")
         return name
 
 
 class JoinGameResponse(BaseModel):
     player_id: str
     game_id: str
+    player_name: str
 
 
 class ScenarioSummary(BaseModel):
@@ -138,6 +163,7 @@ class WSIncoming(BaseModel):
         "question",
         "call_vote",
         "cast_vote",
+        "team_chat",
     ]
     agent_id: Optional[str] = None  # prosecution | defense for question
     text: Optional[str] = Field(default=None, max_length=MAX_QUESTION_LEN)
@@ -154,6 +180,13 @@ class WSIncoming(BaseModel):
         elif self.type == "cast_vote":
             if self.vote not in ("guilty", "not_guilty"):
                 raise ValueError("vote must be 'guilty' or 'not_guilty'")
+        elif self.type == "team_chat":
+            if not self.text or not str(self.text).strip():
+                raise ValueError("text is required for team_chat")
+            text = str(self.text).strip()
+            if len(text) > MAX_TEAM_CHAT_LEN:
+                raise ValueError(f"team chat max {MAX_TEAM_CHAT_LEN} characters")
+            self.text = text
         return self
 
 
@@ -168,5 +201,6 @@ class WSOutgoing(BaseModel):
         "history",
         "status",
         "error",
+        "team_chat",
     ]
     payload: dict

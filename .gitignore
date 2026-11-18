@@ -11,6 +11,7 @@ frontend/dist/
 queue/
 stitch/*.png
 data/
+tts_preview/
 *.egg-info/
 dist/
 build/

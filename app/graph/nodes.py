@@ -9,10 +9,15 @@ from collections import Counter
 
 from langgraph.graph import END
 
-from app.models import GameState
+from app.models import GameState, MAX_QUESTIONS_PER_GAME
 from app.agents.counsel_agent import counsel_speak
 
 DEBATE_SPEECHES = int(os.getenv("DEBATE_SPEECHES", "6"))  # 3 exchanges
+
+
+def count_questions(state: GameState) -> int:
+    """Count juror Q&A turns (not debate speeches / evidence)."""
+    return sum(1 for e in (state.get("transcript") or []) if e.get("kind") == "qa")
 
 
 def classify_intent(state: GameState) -> dict:
@@ -63,6 +68,18 @@ def counsel_respond(state: GameState) -> dict:
     role = event["agent_id"]
     history = state["messages"].get(role, [])
     question = event["text"]
+
+    asked = count_questions(state)
+    if asked >= MAX_QUESTIONS_PER_GAME:
+        return {
+            "pending_response": None,
+            "pending_agent_id": None,
+            "incoming_event": {
+                **event,
+                "rejected": "question_limit",
+                "questions_asked": asked,
+            },
+        }
 
     reply = counsel_speak(
         state["case"], role, mode="qa", conversation=history, player_text=question

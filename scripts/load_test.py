@@ -24,12 +24,33 @@ DEFAULT_HTTP = "http://127.0.0.1:8000"
 DEFAULT_WS = "ws://127.0.0.1:8000"
 
 
+async def _token(client: httpx.AsyncClient, username: str, password: str = "load-secret") -> str | None:
+    signup = await client.post(
+        "/auth/signup", json={"username": username, "password": password}
+    )
+    if signup.status_code == 200:
+        return signup.json()["token"]
+    if signup.status_code == 409:
+        login = await client.post(
+            "/auth/login", json={"username": username, "password": password}
+        )
+        if login.status_code == 200:
+            return login.json()["token"]
+    return None
+
+
 async def play_one(http: str, ws_base: str, scenario_id: str, players: int, debate_n: int) -> dict:
     t0 = time.perf_counter()
     errors: list[str] = []
     async with httpx.AsyncClient(base_url=http, timeout=60.0) as client:
+        host_user = f"load_{int(time.time() * 1000) % 10_000_000}"
+        token = await _token(client, host_user)
+        if not token:
+            return {"ok": False, "error": "auth failed", "secs": time.perf_counter() - t0}
+        headers = {"Authorization": f"Bearer {token}"}
         create = await client.post(
             "/games",
+            headers=headers,
             json={"scenario_id": scenario_id, "expected_players": players},
         )
         if create.status_code != 200:
@@ -38,9 +59,17 @@ async def play_one(http: str, ws_base: str, scenario_id: str, players: int, deba
 
         player_ids = []
         for i in range(players):
+            if i == 0:
+                join_headers = headers
+            else:
+                t = await _token(client, f"{host_user}_p{i}")
+                if not t:
+                    return {"ok": False, "error": "auth failed", "secs": time.perf_counter() - t0}
+                join_headers = {"Authorization": f"Bearer {t}"}
             join = await client.post(
                 f"/games/{game_id}/join",
-                json={"player_name": f"P{i}"},
+                headers=join_headers,
+                json={},
             )
             if join.status_code != 200:
                 return {"ok": False, "error": f"join {join.status_code}", "secs": time.perf_counter() - t0}

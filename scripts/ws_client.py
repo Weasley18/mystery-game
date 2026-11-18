@@ -28,17 +28,39 @@ DEFAULT_HTTP = "http://127.0.0.1:8000"
 DEFAULT_WS = "ws://127.0.0.1:8000"
 
 
-async def create_and_join(base: str, scenario_id: str, name: str, expected: int):
+async def ensure_auth(client: httpx.AsyncClient, name: str, password: str) -> dict:
+    signup = await client.post(
+        "/auth/signup",
+        json={"username": name, "password": password},
+    )
+    if signup.status_code == 409:
+        login = await client.post(
+            "/auth/login",
+            json={"username": name, "password": password},
+        )
+        login.raise_for_status()
+        return login.json()
+    signup.raise_for_status()
+    return signup.json()
+
+
+async def create_and_join(
+    base: str, scenario_id: str, name: str, expected: int, password: str = "cli-secret"
+):
     async with httpx.AsyncClient(base_url=base, timeout=60.0) as client:
+        auth = await ensure_auth(client, name, password)
+        headers = {"Authorization": f"Bearer {auth['token']}"}
         create = await client.post(
             "/games",
+            headers=headers,
             json={"scenario_id": scenario_id, "expected_players": expected},
         )
         create.raise_for_status()
         game = create.json()
         join = await client.post(
             f"/games/{game['game_id']}/join",
-            json={"player_name": name},
+            headers=headers,
+            json={},
         )
         join.raise_for_status()
         player = join.json()

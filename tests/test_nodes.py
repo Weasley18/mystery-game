@@ -25,6 +25,30 @@ def test_classify_and_route():
     assert route_on_intent(make_game_state(intent="cast_vote")) == "cast_vote"
 
 
+def test_question_cap_blocks_eighth():
+    from app.graph.nodes import counsel_respond, count_questions
+    from app.models import MAX_QUESTIONS_PER_GAME
+
+    transcript = [
+        {"kind": "qa", "agent_id": "prosecution", "question": f"q{i}", "text": "a"}
+        for i in range(MAX_QUESTIONS_PER_GAME)
+    ]
+    state = make_game_state(
+        status="questioning",
+        transcript=transcript,
+        incoming_event={
+            "type": "question",
+            "agent_id": "prosecution",
+            "text": "extra?",
+            "player_id": "p1",
+        },
+    )
+    assert count_questions(state) == MAX_QUESTIONS_PER_GAME
+    result = counsel_respond(state)
+    assert result.get("pending_response") is None
+    assert result["incoming_event"]["rejected"] == "question_limit"
+
+
 def test_evidence_round_and_keyword():
     state = make_game_state(
         round=2,

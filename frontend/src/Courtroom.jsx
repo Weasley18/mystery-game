@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { Landmark, BookOpen, Paperclip, MessagesSquare, Play, Vote } from "lucide-react";
+import { useState, useSyncExternalStore } from "react";
+import PagedReader from "./PagedReader.jsx";
 
 const SPRITES = {
   prosecution: "/court/prosecutor-vale.png",
@@ -7,44 +9,46 @@ const SPRITES = {
   defendant: "/court/defendant-evelyn.png",
 };
 
-const STATEMENTS_PER_PAGE = 4;
+const VIEWS = [
+  { id: "scene", label: "Court", Icon: Landmark },
+  { id: "record", label: "Record", Icon: BookOpen },
+  { id: "exhibits", label: "Exhibits", Icon: Paperclip },
+  { id: "chat", label: "Chat", Icon: MessagesSquare },
+];
 
-function Actor({ className, src, name, role, speaking, bubble, onSelect, selectable }) {
-  return (
-    <div
-      className={`actor ${className} ${speaking ? "speaking" : ""} ${selectable ? "selectable" : ""}`}
-      onClick={selectable ? onSelect : undefined}
-      role={selectable ? "button" : undefined}
-      tabIndex={selectable ? 0 : undefined}
-      onKeyDown={
-        selectable
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") onSelect?.();
-            }
-          : undefined
-      }
-    >
-      <div className="sprite-wrap">
-        {bubble ? (
-          <div className="speech">
-            <span className="speech-who">{name || role}</span>
-            <p>{bubble}</p>
-          </div>
-        ) : null}
-        <div className="sprite-figure">
-          <img src={src} alt={name || role} />
-        </div>
-      </div>
-      <div className="nametag">
-        <span>{role}</span>
+const compactLayout = window.matchMedia("(max-width: 820px)");
+function watchLayout(callback) {
+  compactLayout.addEventListener("change", callback);
+  return () => compactLayout.removeEventListener("change", callback);
+}
+
+function Actor({ id, name, role, speaking, onSelect, selected }) {
+  const content = (
+    <>
+      <span className="portrait">
+        <img src={SPRITES[id]} alt="" width="1024" height="1536" />
+      </span>
+      <span className="nametag">
+        <span className="lbl">{role}</span>
         <strong>{name}</strong>
-      </div>
-    </div>
+      </span>
+    </>
+  );
+  const className = `actor ${id}${speaking ? " speaking" : ""}`;
+
+  return onSelect ? (
+    <button type="button" className={className} aria-pressed={selected} onClick={onSelect}>
+      {content}
+    </button>
+  ) : (
+    <div className={className}>{content}</div>
   );
 }
 
 export default function Courtroom({
   lobby,
+  connection,
+  error,
   status,
   messages,
   evidence,
@@ -54,7 +58,6 @@ export default function Courtroom({
   setQuestion,
   onAsk,
   onSend,
-  chatEndRef,
   teamChat,
   chatDraft,
   setChatDraft,
@@ -63,258 +66,196 @@ export default function Courtroom({
   maxQuestions,
   playerName,
 }) {
-  const [page, setPage] = useState(0);
-
-  const lastCounsel = [...messages]
-    .reverse()
-    .find((m) => (m.role === "argument" || m.role === "qa") && m.agentId);
-  const speaking = lastCounsel?.agentId;
-  const bubbleFor = (id) => {
-    if (lastCounsel?.agentId !== id) return "";
-    let t = lastCounsel.text || "";
-    if (lastCounsel.role === "qa") {
-      const idx = t.indexOf("\nA:");
-      if (idx >= 0) t = t.slice(idx + 3).trim();
-    }
-    return t;
-  };
-
-  const lastSystem = [...messages]
-    .reverse()
-    .find((m) => m.role === "system" && !String(m.text).startsWith("Disconnected"));
-
-  const statements = useMemo(
-    () => messages.filter((m) => m.role === "argument" || m.role === "qa" || m.role === "you"),
-    [messages]
-  );
-
-  const pageCount = Math.max(1, Math.ceil(statements.length / STATEMENTS_PER_PAGE));
-  const safePage = Math.min(page, pageCount - 1);
-  const pageItems = statements.slice(
-    safePage * STATEMENTS_PER_PAGE,
-    safePage * STATEMENTS_PER_PAGE + STATEMENTS_PER_PAGE
-  );
-
+  const [view, setView] = useState("scene");
+  const compact = useSyncExternalStore(watchLayout, () => compactLayout.matches);
+  const panel = view === "scene" ? "record" : view;
+  const statements = messages.filter((m) => m.role === "argument" || m.role === "qa" || m.role === "you");
+  const lastCounsel = statements.findLast((m) => m.role !== "you" && m.agentId);
+  const lastVoteUpdate = messages.findLast((m) => m.role === "system" && m.text.startsWith("Votes "));
   const questionsLeft = Math.max(0, maxQuestions - questionsAsked);
-  const atQuestionCap = questionsAsked >= maxQuestions;
+  const connected = connection === "connected";
+  const opening = status === "lobby" || status === "debating";
+  const questioning = status === "questioning";
+  const counselNames = {
+    prosecution: lobby?.prosecution?.name || "Prosecution",
+    defense: lobby?.defense?.name || "Defense",
+  };
+  const judgeSpeaking = status === "voting" || (!lastCounsel && opening);
+  const speaker = judgeSpeaking ? "judge" : lastCounsel?.agentId;
+  const statement = lastCounsel?.text || "";
+  const answerStart = lastCounsel?.role === "qa" ? statement.indexOf("\nA:") : -1;
+  const dialogue = judgeSpeaking
+    ? status === "voting"
+      ? "Members of the jury, you may now vote."
+      : "Court is in session. Counsel may begin."
+    : answerStart >= 0 ? statement.slice(answerStart + 3).trim() : statement;
 
   return (
-    <section className="courtroom">
-      <div className="court-bg" aria-hidden="true" />
-      <div className="court-vignette" aria-hidden="true" />
-
-      <div className="gallery">
-        <div className="bench">
-          <Actor
-            className="judge"
-            src={SPRITES.judge}
-            role="The Court"
-            name="The Bench"
-            speaking={false}
-            bubble={
-              status === "voting"
-                ? "Members of the jury, you may now vote."
-                : lastSystem &&
-                    speaking !== "prosecution" &&
-                    speaking !== "defense"
-                  ? lastSystem.text
-                  : ""
-            }
-          />
-        </div>
-
+    <main className="courtroom" data-view={view}>
+      <h1 className="sr-only">Courtroom</h1>
+      <section className="gallery" aria-label="Courtroom scene">
+        <Actor id="judge" name="The Bench" role="Judge" speaking={judgeSpeaking} />
         <Actor
-          className="defendant"
-          src={SPRITES.defendant}
-          role="Defendant"
-          name={lobby?.defendant?.name || "Accused"}
-        />
-
-        <Actor
-          className={`prosecution ${agentId === "prosecution" && status === "questioning" ? "chosen" : ""}`}
-          src={SPRITES.prosecution}
+          id="prosecution"
+          name={counselNames.prosecution}
           role="Prosecution"
-          name={lobby?.prosecution?.name || "State"}
-          speaking={speaking === "prosecution"}
-          bubble={bubbleFor("prosecution")}
-          selectable={status === "questioning"}
-          onSelect={() => setAgentId("prosecution")}
+          speaking={speaker === "prosecution"}
+          selected={agentId === "prosecution"}
+          onSelect={questioning ? () => setAgentId("prosecution") : undefined}
         />
-
+        <Actor id="defendant" name={lobby?.defendant?.name || "Accused"} role="Defendant" />
         <Actor
-          className={`defense ${agentId === "defense" && status === "questioning" ? "chosen" : ""}`}
-          src={SPRITES.defense}
+          id="defense"
+          name={counselNames.defense}
           role="Defense"
-          name={lobby?.defense?.name || "Counsel"}
-          speaking={speaking === "defense"}
-          bubble={bubbleFor("defense")}
-          selectable={status === "questioning"}
-          onSelect={() => setAgentId("defense")}
+          speaking={speaker === "defense"}
+          selected={agentId === "defense"}
+          onSelect={questioning ? () => setAgentId("defense") : undefined}
         />
-      </div>
-
-      <div className="court-floor">
-        <div className="statements-panel">
-          <div className="panel-head">
-            <div>
-              <span className="lbl">Statements</span>
-              <h2>Counsel record</h2>
+        <div className={`scene-dialogue ${speaker || ""}`} aria-live="polite">
+          {dialogue && (
+            <div className="speech">
+              <PagedReader title={judgeSpeaking ? "The Bench" : counselNames[speaker]} revision={dialogue}>
+                <p>{dialogue}</p>
+              </PagedReader>
             </div>
-            <div className="page-ctrl">
-              <button
-                type="button"
-                className="ghost"
-                disabled={safePage <= 0}
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-              >
-                ←
-              </button>
-              <span>
-                {safePage + 1}/{pageCount}
-              </span>
-              <button
-                type="button"
-                className="ghost"
-                disabled={safePage >= pageCount - 1}
-                onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-              >
-                →
-              </button>
-            </div>
-          </div>
-          <div className="record-strip statements-strip">
-            {pageItems.length === 0 && (
-              <p className="muted">The clerk waits. Ask the court to begin arguments.</p>
-            )}
-            {pageItems.map((m) => (
-              <div key={m.id} className={`slip ${m.role} ${m.agentId || ""}`}>
-                <span className="who">
-                  {m.role === "you"
-                    ? `${playerName || "You"} (juror)`
-                    : m.agentId === "prosecution"
-                      ? lobby?.prosecution?.name || "Prosecution"
-                      : m.agentId === "defense"
-                        ? lobby?.defense?.name || "Defense"
-                        : m.role}
-                </span>
-                <p>{m.text}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <aside className="exhibits-card floor-exhibits">
-          <span className="lbl">Exhibits</span>
-          <ul>
-            {evidence.length === 0 && <li className="muted">None entered.</li>}
-            {evidence.map((item, i) => (
-              <li key={item.id}>
-                <span>Exh {String.fromCharCode(65 + i)}</span>
-                {item.text}
-              </li>
-            ))}
-          </ul>
-        </aside>
-
-        <div className="floor-actions">
-          {status === "questioning" && (
-            <form
-              className="composer floor-composer"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!atQuestionCap) onAsk();
-              }}
-            >
-              <div className="composer-meta">
-                <p className="direct">Ask counsel · {questionsLeft} left</p>
-                <div className="direct-toggle">
-                  <button
-                    type="button"
-                    className={agentId === "prosecution" ? "on prosecution" : ""}
-                    onClick={() => setAgentId("prosecution")}
-                  >
-                    Prosecution
-                  </button>
-                  <button
-                    type="button"
-                    className={agentId === "defense" ? "on defense" : ""}
-                    onClick={() => setAgentId("defense")}
-                  >
-                    Defense
-                  </button>
-                </div>
-              </div>
-              <input
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                placeholder={atQuestionCap ? "Question limit reached" : "Type your question…"}
-                disabled={atQuestionCap}
-              />
-              <button className="primary" type="submit" disabled={atQuestionCap || !question.trim()}>
-                Ask
-              </button>
-            </form>
           )}
+        </div>
+      </section>
 
-          {status === "voting" && (
+      <section className="floor-actions" aria-label="Court actions">
+        {!connected && (
+          <p className="banner" role="status">
+            {connection === "disconnected"
+              ? "Connection closed. Reload the page to rejoin the courtroom."
+              : "Connecting to the courtroom…"}
+          </p>
+        )}
+        {error && <p className="banner error" role="alert">{error}</p>}
+
+        {opening && (
+          <div className="deliberation-bar">
+            <div>
+              <h2>Hear the arguments</h2>
+
+            </div>
+            <button className="primary" disabled={!connected} onClick={() => onSend({ type: "next_argument" })}>
+              <Play aria-hidden="true" />Hear next argument
+            </button>
+          </div>
+        )}
+
+        {questioning && (
+          <>
             <div className="deliberation-bar">
-              <span className="lbl">Your verdict</span>
-              <button className="primary" onClick={() => onSend({ type: "cast_vote", vote: "guilty" })}>
+              <div>
+                <h2>Question counsel</h2>
+                <p className="hint">{questionsLeft} {questionsLeft === 1 ? "question" : "questions"} remaining</p>
+              </div>
+              <button className="secondary" disabled={!connected} onClick={() => onSend({ type: "call_vote" })}>
+                <Vote aria-hidden="true" />Call the vote
+              </button>
+            </div>
+            <form className="floor-composer" onSubmit={(event) => { event.preventDefault(); onAsk(); }}>
+              <select className="counsel-select" aria-label="Choose counsel" value={agentId}
+                onChange={event => setAgentId(event.target.value)}>
+                <option value="prosecution">Prosecution</option>
+                <option value="defense">Defense</option>
+              </select>
+              <div className="direct-toggle" role="group" aria-label="Choose counsel">
+                <button type="button" aria-pressed={agentId === "prosecution"} onClick={() => setAgentId("prosecution")}>
+                  Prosecution
+                </button>
+                <button type="button" aria-pressed={agentId === "defense"} onClick={() => setAgentId("defense")}>
+                  Defense
+                </button>
+              </div>
+              <div className="inline-form">
+                <input
+                  aria-label="Your question"
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  placeholder={questionsLeft ? "Type your question…" : "Question limit reached"}
+                  maxLength={500}
+                  disabled={!questionsLeft}
+                />
+                <button className="primary" disabled={!connected || !questionsLeft || !question.trim()}>
+                  Ask
+                </button>
+              </div>
+            </form>
+          </>
+        )}
+
+        {status === "voting" && (
+          <div className="deliberation-bar">
+            <div>
+              <h2>Cast your vote</h2>
+              {lastVoteUpdate && <p className="hint" role="status">{lastVoteUpdate.text}</p>}
+            </div>
+            <div className="vote-buttons">
+              <button className="primary" disabled={!connected} onClick={() => onSend({ type: "cast_vote", vote: "guilty" })}>
                 Guilty
               </button>
-              <button
-                className="secondary"
-                onClick={() => onSend({ type: "cast_vote", vote: "not_guilty" })}
-              >
+              <button className="secondary" disabled={!connected} onClick={() => onSend({ type: "cast_vote", vote: "not_guilty" })}>
                 Not guilty
               </button>
             </div>
-          )}
-
-          {(status === "lobby" || status === "debating") && (
-            <div className="deliberation-bar">
-              <span className="lbl">Opening</span>
-              <button className="primary" onClick={() => onSend({ type: "next_argument" })}>
-                Hear next argument
-              </button>
-            </div>
-          )}
-        </div>
-
-        <aside className="team-chat">
-          <div className="panel-head">
-            <span className="lbl">Team chat</span>
-            <strong>Jury</strong>
           </div>
-          <div className="chat-log">
-            {teamChat.length === 0 && <p className="muted">Private notes for the gallery.</p>}
-            {teamChat.map((m) => (
-              <div key={m.id} className="chat-line">
-                <span className="who">{m.player_name || "Juror"}</span>
+        )}
+      </section>
+
+      <nav className="court-nav" aria-label="Courtroom views">
+        {VIEWS.map(({ id, label, Icon }) => (
+          <button type="button" key={id} className={`view-${id}`} aria-pressed={(compact ? view : panel) === id}
+            onClick={() => setView(id)}>
+            <Icon aria-hidden="true" />{label}{id === "exhibits" && evidence.length > 0 ? ` (${evidence.length})` : ""}
+          </button>
+        ))}
+      </nav>
+      <aside className="court-floor" aria-label="Jury materials">
+        {panel === "record" && (
+          <PagedReader title="Counsel record" revision={statements.at(-1)?.id}>
+            {!statements.length && <p className="muted">Arguments and answers will appear here.</p>}
+            {statements.slice().reverse().map(m => (
+              <article key={m.id} className={`slip ${m.role} ${m.agentId || ""}`}>
+                <h3 className="who">{m.role === "you" ? playerName : counselNames[m.agentId] || "Counsel"}</h3>
                 <p>{m.text}</p>
-              </div>
+              </article>
             ))}
-            <div ref={chatEndRef} />
-          </div>
-          <form
-            className="chat-compose"
-            onSubmit={(e) => {
-              e.preventDefault();
-              onSendChat();
-            }}
-          >
-            <input
-              value={chatDraft}
-              onChange={(e) => setChatDraft(e.target.value)}
-              placeholder="Message the jury…"
-              maxLength={280}
-            />
-            <button type="submit" className="secondary" disabled={!chatDraft.trim()}>
-              Send
-            </button>
-          </form>
-        </aside>
-      </div>
-    </section>
+          </PagedReader>
+        )}
+        {panel === "exhibits" && (
+          <PagedReader title="Exhibits" revision={evidence.length}>
+            {!evidence.length && <p className="muted">No exhibits entered.</p>}
+            {evidence.map((item, i) => (
+              <article className="slip" key={item.id}><h3 className="who">Exhibit {String.fromCharCode(65+i)}</h3><p>{item.text}</p></article>
+            ))}
+          </PagedReader>
+        )}
+        {panel === "chat" && (
+          <>
+            <PagedReader title="Jury chat" revision={teamChat.at(-1)?.id}>
+              {!teamChat.length && <p className="muted">No messages yet.</p>}
+              {teamChat.slice().reverse().map(m => (
+                <article key={m.id} className="chat-line"><strong className="who">{m.player_name || "Juror"}</strong><p>{m.text}</p></article>
+              ))}
+            </PagedReader>
+            <form className="inline-form" onSubmit={(event) => { event.preventDefault(); onSendChat(); }}>
+              <input
+                aria-label="Message the jury"
+                value={chatDraft}
+                onChange={(event) => setChatDraft(event.target.value)}
+                placeholder="Message the jury…"
+                maxLength={280}
+              />
+              <button type="submit" className="secondary" disabled={!connected || !chatDraft.trim()}>
+                Send
+              </button>
+            </form>
+          </>
+        )}
+      </aside>
+    </main>
   );
 }

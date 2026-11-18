@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Scale, SlidersHorizontal, DoorOpen, FolderOpen, LockKeyhole, MapPin, UsersRound, Gavel } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import "./App.css";
+import PagedReader from "./PagedReader.jsx";
 import Courtroom from "./Courtroom.jsx";
 import QuickOptions from "./QuickOptions.jsx";
 
@@ -15,6 +17,13 @@ const API_WS =
 const STORAGE_KEY = "courtroom_session";
 const AUTH_KEY = "courtroom_auth";
 const MAX_QUESTIONS = 7;
+
+function showVerdict(dialog) {
+  if (!dialog || dialog.open) return;
+  dialog.showModal();
+  dialog.querySelector("h2").focus({ preventScroll: true });
+  dialog.scrollTop = 0;
+}
 
 /** Map API / WS error payloads to a single juror-facing warning. */
 function formatWarning(detail, cooldown) {
@@ -166,18 +175,19 @@ function clearAuth() {
 
 function App() {
   const [auth, setAuth] = useState(() => loadAuth());
+  const [savedSession] = useState(() => auth?.token ? loadSession() : null);
   const [authMode, setAuthMode] = useState("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
-  const [screen, setScreen] = useState("home");
+  const [screen, setScreen] = useState(savedSession?.gameId && savedSession?.playerId ? "lobby" : "home");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scenarios, setScenarios] = useState([]);
   const [scenarioId, setScenarioId] = useState("manor_poison");
   const [joinGameId, setJoinGameId] = useState("");
   const [expectedPlayers, setExpectedPlayers] = useState(1);
-  const [gameId, setGameId] = useState(null);
-  const [playerId, setPlayerId] = useState(null);
+  const [gameId, setGameId] = useState(savedSession?.gameId ?? null);
+  const [playerId, setPlayerId] = useState(savedSession?.playerId ?? null);
   const [lobby, setLobby] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -192,16 +202,22 @@ function App() {
   const [teamChat, setTeamChat] = useState([]);
   const [chatDraft, setChatDraft] = useState("");
   const wsRef = useRef(null);
-  const teamChatEndRef = useRef(null);
+  const [connection, setConnection] = useState("connecting");
 
   const playerName = auth?.username || "Juror";
+  const authToken = auth?.token;
   const maxQuestions = MAX_QUESTIONS;
+  const view = authToken ? screen : "auth";
+
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, [view]);
 
   const authHeaders = useCallback(() => {
     const h = { "Content-Type": "application/json" };
-    if (auth?.token) h.Authorization = `Bearer ${auth.token}`;
+    if (authToken) h.Authorization = `Bearer ${authToken}`;
     return h;
-  }, [auth]);
+  }, [authToken]);
 
   const pushMessage = useCallback((msg) => {
     setMessages((prev) => [...prev, { id: crypto.randomUUID(), ...msg }]);
@@ -212,6 +228,7 @@ function App() {
     sessionStorage.removeItem(STORAGE_KEY);
     setAuth(null);
     setScreen("home");
+    setStatus("lobby");
     setGameId(null);
     setPlayerId(null);
     setLobby(null);
@@ -222,13 +239,15 @@ function App() {
     setError(null);
   }, []);
 
-  const refreshScenarios = useCallback(async () => {
+  const refreshScenarios = useCallback(async (signal) => {
     try {
       const res = await fetch(`${API_HTTP}/scenarios`, {
-        headers: auth?.token ? { Authorization: `Bearer ${auth.token}` } : {},
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+        signal,
       });
       if (!res.ok) throw new Error(await readHttpWarning(res));
       const list = await res.json();
+      if (signal?.aborted) return;
       setScenarios(list);
       const firstOpen = list.find((s) => s.unlocked !== false) || list[0];
       if (firstOpen) setScenarioId((cur) => {
@@ -236,9 +255,9 @@ function App() {
         return still ? cur : firstOpen.id;
       });
     } catch (e) {
-      setError(formatWarning(e.message || e || "Failed to load scenarios"));
+      if (!signal?.aborted) setError(formatWarning(e.message || e || "Failed to load scenarios"));
     }
-  }, [auth]);
+  }, [authToken]);
 
   // Restore auth + optional reconnect
   useEffect(() => {
@@ -275,16 +294,13 @@ function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!auth?.token) return;
-    refreshScenarios();
-
-    const sess = loadSession();
-    if (sess?.gameId && sess?.playerId) {
-      setGameId(sess.gameId);
-      setPlayerId(sess.playerId);
-      setScreen("lobby");
-    }
-  }, [auth?.token, refreshScenarios]);
+    if (!authToken) return;
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) refreshScenarios(controller.signal);
+    });
+    return () => controller.abort();
+  }, [authToken, refreshScenarios]);
 
   // Lobby polling
   useEffect(() => {
@@ -303,7 +319,7 @@ function App() {
           }
           if (data.evidence_revealed) setEvidence(data.evidence_revealed);
           if (data.status === "finished" && data.correct != null) {
-            setVerdict({
+            setVerdict((previous) => previous || {
               correct: data.correct,
               yes_or_no: data.correct ? "Yes" : "No",
               majority: data.majority,
@@ -363,20 +379,12 @@ function App() {
         );
         if (data.payload?.evidence_revealed) setEvidence(data.payload.evidence_revealed);
         if (data.payload?.status) setStatus(data.payload.status);
+        setConnection("connected");
         if (typeof data.payload?.questions_asked === "number") {
           setQuestionsAsked(data.payload.questions_asked);
         }
         if (Array.isArray(data.payload?.team_chat)) {
           setTeamChat(data.payload.team_chat);
-        }
-        if (data.payload?.correct != null) {
-          setVerdict({
-            correct: data.payload.correct,
-            yes_or_no: data.payload.correct ? "Yes" : "No",
-            solution: data.payload.solution,
-            verdict_truth: data.payload.verdict_truth,
-            majority: data.payload.majority,
-          });
         }
       } else if (data.type === "argument") {
         setStatus(data.payload?.status || "debating");
@@ -405,7 +413,7 @@ function App() {
           text: `Evidence: ${items.map((i) => i.text).join(" | ")}`,
         });
       } else if (data.type === "status") {
-        setStatus(data.payload?.status || status);
+        if (data.payload?.status) setStatus(data.payload.status);
       } else if (data.type === "vote_progress") {
         setStatus(data.payload?.status || "voting");
         pushMessage({
@@ -426,33 +434,19 @@ function App() {
           return [...prev, data.payload];
         });
       } else if (data.type === "error") {
-        pushMessage({
-          role: "error",
-          text: formatWarning(data.payload?.detail ?? data.payload, data.payload?.cooldown),
-        });
+        setError(formatWarning(data.payload?.detail ?? data.payload, data.payload?.cooldown));
       }
     };
 
-    ws.onerror = () =>
-      pushMessage({
-        role: "error",
-        text: formatWarning("WebSocket error"),
-      });
-    ws.onclose = () =>
-      pushMessage({
-        role: "system",
-        text: "Connection closed. Re-enter the courtroom if you need to continue.",
-      });
+    ws.onerror = () => setError(formatWarning("WebSocket error"));
+    ws.onclose = () => setConnection("disconnected");
 
     return () => {
+      ws.onmessage = ws.onerror = ws.onclose = null;
       ws.close();
       wsRef.current = null;
     };
-  }, [screen, gameId, playerId, pushMessage, status, refreshScenarios]);
-
-  useEffect(() => {
-    teamChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [teamChat]);
+  }, [screen, gameId, playerId, pushMessage, refreshScenarios]);
 
   async function submitAuth(e) {
     e.preventDefault();
@@ -513,6 +507,7 @@ function App() {
         playerName: player.player_name || playerName,
       });
       setLobby({ ...game, status: "lobby", players: [player.player_name || playerName] });
+      setStatus("lobby");
       setQuestionsAsked(0);
       setTeamChat([]);
       setMessages([]);
@@ -561,14 +556,16 @@ function App() {
   }
 
   function send(payload) {
-    if (!wsRef.current || wsRef.current.readyState !== 1) return;
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return false;
+    setError(null);
     wsRef.current.send(JSON.stringify(payload));
+    return true;
   }
 
   function sendQuestion() {
     const text = question.trim();
     if (!text || questionsAsked >= maxQuestions) return;
-    send({ type: "question", agent_id: agentId, text });
+    if (!send({ type: "question", agent_id: agentId, text })) return;
     pushMessage({ role: "you", agentId, text });
     setQuestion("");
   }
@@ -576,34 +573,37 @@ function App() {
   function sendTeamChat() {
     const text = chatDraft.trim();
     if (!text) return;
-    send({ type: "team_chat", text });
-    setChatDraft("");
+    if (send({ type: "team_chat", text })) setChatDraft("");
   }
 
   function leaveChamber() {
     sessionStorage.removeItem(STORAGE_KEY);
     setScreen("home");
+    setStatus("lobby");
     setGameId(null);
     setPlayerId(null);
     setLobby(null);
     setVerdict(null);
     setMessages([]);
     setTeamChat([]);
+    setChatDraft("");
+    setQuestion("");
     setSidebarOpen(false);
+    setError(null);
   }
 
   const selected = scenarios.find((s) => s.id === scenarioId);
   const selectedLocked = selected && selected.unlocked === false;
   const phase =
     status === "debating" || status === "lobby"
-      ? "DEBATE"
+      ? (screen === "lobby" ? "Lobby" : "Debate")
       : status === "questioning"
-        ? "EXAMINATION"
+        ? "Questioning"
         : status === "voting"
-          ? "JURY"
+          ? "Voting"
           : status === "finished"
-            ? "SEALED"
-            : String(status || "DOCKET").toUpperCase();
+            ? "Finished"
+            : "Lobby";
 
   const nextScenario = verdict?.next_level
     ? scenarios.find((s) => s.level === verdict.next_level && s.unlocked !== false)
@@ -612,49 +612,44 @@ function App() {
   // —— Login / signup ——
   if (!auth?.token) {
     return (
-      <div className="app antechamber">
-        <div className="scanlines" aria-hidden="true" />
+      <div className="app">
         <header className="topbar">
           <div className="brand">
-            <span className="seal" aria-hidden="true" />
-            <h1>THE DOCKET</h1>
-          </div>
-          <p className="kicker">All rise.</p>
-          <div className="juror-meta">
-            <span className="lbl">Gallery</span>
-            <strong>Sign in</strong>
+            <span className="seal" aria-hidden="true"><Scale /></span>
+            <span>The Docket</span>
           </div>
         </header>
 
-        {error && <div className="banner error">{error}</div>}
-
-        <section className="login-panel">
-          <div className="hero">
-            <p className="eyebrow">Court roll</p>
-            <h2>Enter your name and ID</h2>
+        <main className="login-panel">
+          <div className="hero login-hero">
+            <h1>Take your seat on the jury.</h1>
             <p>
-              Sign in to open cases. Higher levels unlock when you clear the one before.
+              Hear both sides, examine the evidence, and deliver a verdict.
             </p>
           </div>
           <form className="session-card login-card" onSubmit={submitAuth}>
+            <h2>{authMode === "signup" ? "Join the jury" : "Welcome back"}</h2>
             <div className="auth-tabs">
               <button
                 type="button"
                 className={authMode === "login" ? "on" : ""}
-                onClick={() => setAuthMode("login")}
+                aria-pressed={authMode === "login"}
+                onClick={() => { setAuthMode("login"); setError(null); }}
               >
-                I have an ID
+                Sign in
               </button>
               <button
                 type="button"
                 className={authMode === "signup" ? "on" : ""}
-                onClick={() => setAuthMode("signup")}
+                aria-pressed={authMode === "signup"}
+                onClick={() => { setAuthMode("signup"); setError(null); }}
               >
                 New juror
               </button>
             </div>
+            {error && <p className="banner error" role="alert">{error}</p>}
             <label>
-              Name
+              Juror name
               <input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
@@ -662,7 +657,6 @@ function App() {
                 required
                 minLength={2}
                 maxLength={40}
-                placeholder="juror_name"
               />
             </label>
             <label>
@@ -674,48 +668,42 @@ function App() {
                 autoComplete={authMode === "signup" ? "new-password" : "current-password"}
                 required
                 minLength={6}
-                placeholder="••••••••"
               />
             </label>
             <button className="primary" type="submit" disabled={busy}>
-              {busy ? "Checking roll…" : authMode === "signup" ? "Create account →" : "Play →"}
+              <DoorOpen aria-hidden="true" />
+              {busy ? "Checking credentials…" : authMode === "signup" ? "Create account" : "Enter the docket"}
             </button>
           </form>
-        </section>
+        </main>
       </div>
     );
   }
 
   return (
-    <div className={`app ${screen === "play" ? "in-session" : "antechamber"}`}>
-      <div className="scanlines" aria-hidden="true" />
+    <div className={screen === "play" ? "app court-session" : "app"}>
       <header className="topbar">
         <div className="brand">
-          <span className="seal" aria-hidden="true" />
-          <h1>THE DOCKET</h1>
+          <span className="seal" aria-hidden="true"><Scale /></span>
+          <span>The Docket</span>
         </div>
-        {screen !== "home" ? (
+        {screen !== "home" && (
           <div className="case-chip">
-            <span className="lbl">Case</span>
-            <strong>{lobby?.title || selected?.title || "Session"}</strong>
+            <strong>{lobby?.title || "Court session"}</strong>
             <em>{phase}</em>
           </div>
-        ) : (
-          <p className="kicker">All rise.</p>
         )}
         <div className="juror-meta">
-          <span className="lbl">Juror</span>
           <strong>{playerName}</strong>
-          {gameId && <code>{gameId}</code>}
           <button
             type="button"
             className="menu-btn"
             aria-label="Quick options"
+            aria-expanded={sidebarOpen}
+            aria-haspopup="dialog"
             onClick={() => setSidebarOpen(true)}
           >
-            <span />
-            <span />
-            <span />
+            <SlidersHorizontal aria-hidden="true" />
           </button>
         </div>
       </header>
@@ -725,6 +713,7 @@ function App() {
         onClose={() => setSidebarOpen(false)}
         screen={screen}
         status={status}
+        connected={connection === "connected"}
         expectedPlayers={expectedPlayers}
         setExpectedPlayers={setExpectedPlayers}
         joinGameId={joinGameId}
@@ -747,19 +736,19 @@ function App() {
         scenarioLocked={!!selectedLocked}
       />
 
-      {error && <div className="banner error">{error}</div>}
+      {error && screen !== "play" && <div className="banner error" role="alert">{error}</div>}
 
       {screen === "home" && (
-        <section className="docket">
-          <div className="hero">
-            <p className="eyebrow">You sit in the jury box</p>
-            <h2>Two advocates. One sealed truth.</h2>
+        <main className="docket">
+          <div className="hero docket-hero">
+            <h1>Case files</h1>
             <p>
-              Clear each level to unlock the next. Watch counsel argue, ask up to seven
-              questions, then vote guilty or not guilty.
+              Choose a case to hear. Match the sealed verdict to unlock the next level.
             </p>
+            <a className="session-link" href="#session-setup">Jump to session setup ↓</a>
           </div>
-          <div className="case-grid all-rise">
+          <div className="case-grid" aria-label="Available cases">
+            {scenarios.length === 0 && !error && <p role="status">Loading cases…</p>}
             {Array.isArray(scenarios) &&
               scenarios.map((s) => {
                 const locked = s.unlocked === false;
@@ -772,100 +761,114 @@ function App() {
                       if (!locked) setScenarioId(s.id);
                     }}
                     disabled={locked}
+                    aria-pressed={s.id === scenarioId}
                     title={locked ? "Clear the previous level first" : s.title}
                   >
                     <span className="lvl">
-                      {locked ? "Locked · " : ""}Level {s.level}
+                      {locked ? <LockKeyhole aria-hidden="true" /> : <FolderOpen aria-hidden="true" />}
+                      Level {s.level}{locked ? " · Locked" : ""}
                     </span>
                     <h3>{s.title}</h3>
                     <p>{s.case_summary}</p>
-                    <small>{s.setting}</small>
+                    <small><MapPin aria-hidden="true" />{s.setting}</small>
                   </button>
                 );
               })}
           </div>
-          <div className="session-card">
-            <h3>Open a session</h3>
-            <p className="hint">
-              Signed in as <strong>{playerName}</strong>
-              {selectedLocked
-                ? " · selected case is locked"
-                : selected
-                  ? ` · Level ${selected.level}`
-                  : ""}
-            </p>
-            <label>
-              Expected jurors
-              <input
-                type="number"
-                min={1}
-                value={expectedPlayers}
-                onChange={(e) => setExpectedPlayers(e.target.value)}
-              />
-            </label>
-            <button
-              className="primary"
-              disabled={busy || selectedLocked || !selected}
-              onClick={createGame}
-            >
-              {busy ? "Convening…" : "Open court →"}
-            </button>
-            <div className="or">or join an existing gallery</div>
-            <label>
-              Docket id
-              <input
-                value={joinGameId}
-                onChange={(e) => setJoinGameId(e.target.value)}
-                placeholder="abc123def0"
-              />
-            </label>
-            <button
-              className="secondary"
-              disabled={busy || !joinGameId.trim()}
-              onClick={joinExisting}
-            >
-              Join gallery
-            </button>
-          </div>
-        </section>
+          <aside className="session-card session-panel" id="session-setup">
+            <form onSubmit={(event) => { event.preventDefault(); createGame(); }}>
+              <h2>Open a session</h2>
+              {selected && <p className="hint">{selected.title}</p>}
+              <label>
+                Expected jurors
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  required
+                  value={expectedPlayers}
+                  onChange={(e) => setExpectedPlayers(e.target.value)}
+                />
+              </label>
+              <button
+                className="primary"
+                type="submit"
+                disabled={busy || selectedLocked || !selected}
+              >
+                <Gavel aria-hidden="true" />{busy ? "Please wait…" : "Open court"}
+              </button>
+            </form>
+            <form className="join-form" onSubmit={(event) => { event.preventDefault(); joinExisting(); }}>
+              <h2>Join a session</h2>
+              <label>
+                Docket ID
+                <input
+                  value={joinGameId}
+                  onChange={(e) => setJoinGameId(e.target.value)}
+                  placeholder="abc123def0"
+                />
+              </label>
+              <button
+                className="secondary"
+                type="submit"
+                disabled={busy || !joinGameId.trim()}
+              >
+                <UsersRound aria-hidden="true" />Join gallery
+              </button>
+            </form>
+          </aside>
+        </main>
+      )}
+
+      {screen === "lobby" && !lobby && (
+        <main className="session-card lobby-loading">
+          <h1 role="status">{error ? "Session unavailable" : "Opening case file…"}</h1>
+          <button className="secondary" onClick={leaveChamber}>Back to cases</button>
+        </main>
       )}
 
       {screen === "lobby" && lobby && (
-        <section className="lobby-grid">
-          <article className="file">
+        <main className="lobby-grid">
+          <article className="file case-file">
             <p className="eyebrow">The charge</p>
-            <h2>{lobby.title}</h2>
+            <h1>{lobby.title}</h1>
             <p className="lead">{lobby.charge}</p>
             <p>{lobby.case_summary}</p>
-            <p>
-              Defendant <strong>{lobby.defendant?.name}</strong>
-            </p>
-            <img className="lobby-sprite accused" src="/court/defendant-evelyn.png" alt="" />
-            <p className="hint">
-              Share docket <code>{gameId}</code> · {lobby.status}
-            </p>
-            <button className="primary" onClick={() => setScreen("play")}>
-              Enter courtroom
-            </button>
-            <button className="secondary" onClick={leaveChamber}>
-              Leave
-            </button>
+            <div className="lobby-person">
+              <img className="lobby-sprite" src="/court/defendant-evelyn.png" width="1024" height="1536" alt="" />
+              <div><span className="lbl">Defendant</span><h2>{lobby.defendant?.name}</h2></div>
+            </div>
+            <div className="lobby-actions">
+              <button className="primary" onClick={() => {
+                setError(null);
+                setConnection("connecting");
+                setScreen("play");
+              }}>
+                <DoorOpen aria-hidden="true" />Enter courtroom
+              </button>
+              <button className="secondary" onClick={leaveChamber}>Back to cases</button>
+            </div>
           </article>
           <div className="counsel-pair">
             <article className="counsel prosecution">
-              <img className="lobby-sprite" src="/court/prosecutor-vale.png" alt="" />
-              <span className="lbl">Prosecution</span>
-              <h3>{lobby.prosecution?.name}</h3>
-              <p>{lobby.prosecution?.persona}</p>
+              <img className="lobby-sprite" src="/court/prosecutor-vale.png" width="1024" height="1536" alt="" />
+              <div>
+                <span className="lbl">Prosecution</span>
+                <h2>{lobby.prosecution?.name}</h2>
+                <p>{lobby.prosecution?.persona}</p>
+              </div>
             </article>
             <article className="counsel defense">
-              <img className="lobby-sprite" src="/court/defense-okonkwo.png" alt="" />
-              <span className="lbl">Defense</span>
-              <h3>{lobby.defense?.name}</h3>
-              <p>{lobby.defense?.persona}</p>
+              <img className="lobby-sprite" src="/court/defense-okonkwo.png" width="1024" height="1536" alt="" />
+              <div>
+                <span className="lbl">Defense</span>
+                <h2>{lobby.defense?.name}</h2>
+                <p>{lobby.defense?.persona}</p>
+              </div>
             </article>
             <article className="file jurors">
-              <h3>Gallery</h3>
+              <h2>Jury gallery</h2>
+              <p className="hint">Share docket ID <code>{gameId}</code></p>
               <ul>
                 {(lobby.players || []).map((p, i) => (
                   <li key={i}>{p}</li>
@@ -873,12 +876,14 @@ function App() {
               </ul>
             </article>
           </div>
-        </section>
+        </main>
       )}
 
       {screen === "play" && (
         <Courtroom
           lobby={lobby}
+          connection={connection}
+          error={error}
           status={status}
           messages={messages}
           evidence={evidence}
@@ -888,7 +893,6 @@ function App() {
           setQuestion={setQuestion}
           onAsk={sendQuestion}
           onSend={send}
-          chatEndRef={teamChatEndRef}
           teamChat={teamChat}
           chatDraft={chatDraft}
           setChatDraft={setChatDraft}
@@ -900,17 +904,20 @@ function App() {
       )}
 
       {verdict && (
-        <div className="verdict-veil">
-          <article className="verdict-sheet">
-            <span className="lbl">The tribunal has reached a</span>
-            <h2>Verdict</h2>
+        <dialog
+          className="verdict-sheet"
+          ref={showVerdict}
+          aria-labelledby="verdict-title"
+          onCancel={(event) => event.preventDefault()}
+        >
+          <PagedReader title="Verdict" headingId="verdict-title" revision={verdict.solution}>
             <p className={`mega ${verdict.correct ? "yes" : "no"}`}>
               {verdict.yes_or_no || (verdict.correct ? "Yes" : "No")}
             </p>
             <p className="sub">
               {verdict.correct
                 ? "The jury matched the sealed truth"
-                : "The gallery missed the sealed truth"}
+                : "The jury missed the sealed truth"}
             </p>
 
             <div className="verdict-facts">
@@ -930,45 +937,43 @@ function App() {
                   <span className="lbl">Progress</span>
                   <strong>
                     Level {verdict.level || "?"} cleared
-                    {verdict.next_level ? ` · Level ${verdict.next_level} unlocked` : ""}
+                    {nextScenario ? ` · Level ${nextScenario.level} unlocked` : ""}
                   </strong>
                 </div>
               ) : null}
             </div>
 
-            <div className="reason">
-              <div className="reason-head">
-                <span>Solution</span>
-              </div>
+            <section className="reason">
+              <h3>Case solution</h3>
               <p>{verdict.solution}</p>
-            </div>
+            </section>
 
-            <div className="verdict-actions">
-              {nextScenario && (
-                <button
-                  className="primary"
-                  onClick={() => {
-                    setScenarioId(nextScenario.id);
-                    setVerdict(null);
-                    leaveChamber();
-                  }}
-                >
-                  Open level {verdict.next_level}
-                </button>
-              )}
+          </PagedReader>
+          <div className="verdict-actions">
+            {nextScenario && (
               <button
-                className="secondary"
+                className="primary"
                 onClick={() => {
+                  setScenarioId(nextScenario.id);
                   setVerdict(null);
                   leaveChamber();
-                  refreshScenarios();
                 }}
               >
-                Back to cases
+                Open level {verdict.next_level}
               </button>
-            </div>
-          </article>
-        </div>
+            )}
+            <button
+              className="secondary"
+              onClick={() => {
+                setVerdict(null);
+                leaveChamber();
+                refreshScenarios();
+              }}
+            >
+              Back to cases
+            </button>
+          </div>
+        </dialog>
       )}
     </div>
   );

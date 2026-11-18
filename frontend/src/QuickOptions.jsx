@@ -1,8 +1,11 @@
+import { X, LogOut } from "lucide-react";
+
 export default function QuickOptions({
   open,
   onClose,
   screen,
   status,
+  connected,
   expectedPlayers,
   setExpectedPlayers,
   joinGameId,
@@ -24,13 +27,18 @@ export default function QuickOptions({
   const atHome = screen === "home";
 
   return (
-    <>
-      <button type="button" className="sidebar-backdrop" aria-label="Close menu" onClick={onClose} />
-      <aside className="quick-options" aria-label="Quick options">
+    <dialog
+      className="quick-options"
+      aria-labelledby="options-title"
+      ref={(dialog) => { if (dialog && !dialog.open) dialog.showModal(); }}
+      onClose={onClose}
+      onClick={(event) => { if (event.target === event.currentTarget) event.currentTarget.close(); }}
+    >
+      <div className="quick-content">
         <div className="quick-head">
-          <span className="lbl">Quick options</span>
-          <button type="button" className="ghost menu-close" onClick={onClose} aria-label="Close">
-            ✕
+          <h2 id="options-title">Quick options</h2>
+          <button type="button" className="ghost menu-close" onClick={(event) => event.currentTarget.closest("dialog").close()} aria-label="Close quick options">
+            <X aria-hidden="true" />
           </button>
         </div>
 
@@ -42,12 +50,12 @@ export default function QuickOptions({
               Questions {questionsAsked}/{maxQuestions}
             </p>
             {(status === "lobby" || status === "debating") && (
-              <button type="button" className="primary" onClick={onNextArgument}>
+              <button type="button" className="primary" disabled={!connected} onClick={onNextArgument}>
                 Hear next argument
               </button>
             )}
             {status === "questioning" && (
-              <button type="button" className="secondary" onClick={onCallVote}>
+              <button type="button" className="secondary" disabled={!connected} onClick={onCallVote}>
                 Call the vote
               </button>
             )}
@@ -65,6 +73,7 @@ export default function QuickOptions({
               <input
                 type="number"
                 min={1}
+                max={12}
                 value={expectedPlayers}
                 onChange={(e) => setExpectedPlayers(e.target.value)}
               />
@@ -107,10 +116,10 @@ export default function QuickOptions({
 
         <div className="quick-block quick-foot">
           <button type="button" className="secondary" onClick={onSignOut}>
-            Sign out
+            <LogOut aria-hidden="true" />Sign out
           </button>
         </div>
-      </aside>
-    </>
+      </div>
+    </dialog>
   );
 }
